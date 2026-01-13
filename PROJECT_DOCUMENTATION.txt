@@ -1,0 +1,389 @@
+================================================================================
+                      SENTIMENT ANALYSER PROJECT DOCUMENTATION
+================================================================================
+
+Project: AI-Powered Social Media Sentiment Analysis System
+Version: 2.0
+Last Updated: January 2026
+
+================================================================================
+                               TABLE OF CONTENTS
+================================================================================
+
+1. Problem Statement
+2. Solution Overview
+3. System Architecture
+4. Current Limitations & Constraints
+5. Recommendations for Production Readiness
+6. Future Enhancements
+
+================================================================================
+                           1. PROBLEM STATEMENT
+================================================================================
+
+BUSINESS CHALLENGE:
+-------------------
+Brands and businesses in Nigeria (and globally) struggle to understand public 
+perception of their products, services, and overall reputation on social media. 
+Traditional market research methods are:
+
+  - Slow and expensive (surveys, focus groups)
+  - Provide outdated data by the time results are available
+  - Cannot capture real-time public sentiment shifts
+  - Lack competitor comparison capabilities
+  - Miss nuanced customer complaints and feedback patterns
+
+SPECIFIC PROBLEMS THIS SOLUTION ADDRESSES:
+------------------------------------------
+
+1. REAL-TIME BRAND MONITORING
+   Problem: Brands cannot track what customers are saying about them on Twitter/X
+   in real-time, leading to delayed response to PR crises or negative feedback.
+
+2. SENTIMENT QUANTIFICATION
+   Problem: Manual reading of social media mentions does not scale, and subjective
+   interpretation leads to inconsistent analysis.
+
+3. COMPETITOR INTELLIGENCE
+   Problem: Businesses lack visibility into how competitors are perceived 
+   compared to their own brand, missing strategic positioning opportunities.
+
+4. CUSTOMER COMPLAINT CATEGORIZATION
+   Problem: Identifying recurring complaint themes (service issues, pricing, 
+   product quality) across thousands of mentions is nearly impossible manually.
+
+5. ACTIONABLE INSIGHTS
+   Problem: Raw social media data is overwhelming; businesses need structured
+   analytics with sentiment scores, trends, and categorized feedback.
+
+================================================================================
+                           2. SOLUTION OVERVIEW
+================================================================================
+
+The Sentiment Analyser is an end-to-end AI-powered system that:
+
+CORE CAPABILITIES:
+------------------
+
+1. AUTOMATED TWEET SCRAPING
+   - Collects tweets mentioning a specific brand/keyword from Twitter/X
+   - Focuses on English language content
+   - Retrieves configurable number of tweets (default: 30)
+
+2. AI-POWERED SENTIMENT ANALYSIS
+   - Uses RoBERTa transformer model (cardiffnlp/twitter-roberta-base-sentiment)
+   - Specifically trained on Twitter data for higher accuracy
+   - Classifies tweets as Positive, Negative, or Neutral
+   - Provides confidence scores for each classification
+
+3. COMPETITOR IDENTIFICATION & COMPARISON
+   - Uses Azure OpenAI (GPT-4o) to identify real competitors in the Nigerian market
+   - Scrapes and analyzes sentiment for each competitor
+   - Provides side-by-side sentiment comparison
+
+4. COMPLAINT CATEGORIZATION
+   - Automatically categorizes negative tweets into themes:
+     * Service Issues
+     * Product Quality
+     * Pricing Concerns
+     * Delivery Problems
+     * App/Technical Issues
+   - Uses keyword-based classification
+
+5. MOBILE-FIRST INTERFACE
+   - React Native (Expo) mobile application
+   - Cross-platform: iOS and Android support
+   - Intuitive UI for non-technical business users
+
+TECHNOLOGY STACK:
+-----------------
+Backend:
+  - Python 3
+  - FastAPI (REST API framework)
+  - Selenium WebDriver (web scraping)
+  - Hugging Face Transformers (RoBERTa model)
+  - Pandas (data processing)
+  - Azure OpenAI Client (competitor identification)
+
+Frontend:
+  - React Native with Expo
+  - TypeScript
+  - Axios (HTTP client)
+
+================================================================================
+                           3. SYSTEM ARCHITECTURE
+================================================================================
+
+                    +------------------+
+                    |  Mobile App      |
+                    |  (React Native)  |
+                    +--------+---------+
+                             |
+                             | HTTP/REST
+                             v
+                    +------------------+
+                    |   FastAPI        |
+                    |   Backend        |
+                    +--------+---------+
+                             |
+              +--------------+--------------+
+              |              |              |
+              v              v              v
+     +--------+--+   +-------+---+   +------+------+
+     | Selenium  |   | RoBERTa   |   | Azure       |
+     | Scraper   |   | Sentiment |   | OpenAI      |
+     | (Twitter) |   | Model     |   | (GPT-4o)    |
+     +--------+--+   +-----------+   +-------------+
+              |
+              v
+        +-----+------+
+        |  Twitter/X |
+        +------------+
+
+API ENDPOINTS:
+--------------
+1. POST /analyze_sentiment - Single brand sentiment analysis
+2. POST /analyze_all - Unified analysis with customer voice data
+3. POST /analyze_competitors - Competitor comparison analysis
+4. POST /customer_complaints - Categorized complaint analysis
+5. GET /health - Service health check
+
+================================================================================
+                    4. CURRENT LIMITATIONS & CONSTRAINTS
+================================================================================
+
+CRITICAL ISSUES (Blocking Production Deployment):
+-------------------------------------------------
+
+1. TWITTER/X SCRAPING RELIABILITY
+   Severity: CRITICAL
+   
+   Issue: The scraper uses Selenium with a local Chrome profile, which is:
+   - Dependent on user's local Chrome installation
+   - Prone to breaking when Twitter/X updates their anti-bot measures
+   - Requires the Chrome browser to be closed before scraping
+   - Uses hardcoded Windows-specific file paths
+   - Kills all Chrome processes before scraping (disruptive)
+   
+   Impact: Unreliable data collection; scraper may fail frequently.
+
+2. HARDCODED CREDENTIALS IN SOURCE CODE
+   Severity: CRITICAL
+   
+   Issue: Azure OpenAI API key is hardcoded in gemini_client.py:
+   "<REMOVED>"
+   
+   Impact: Security vulnerability; API key exposure in version control.
+
+3. SINGLE-MACHINE ARCHITECTURE
+   Severity: HIGH
+   
+   Issue: Scraper requires local Chrome with user profile, cannot run in
+   cloud/containerized environments without significant modification.
+   
+   Impact: Cannot scale horizontally; cannot deploy to cloud platforms.
+
+4. NO DATA PERSISTENCE
+   Severity: HIGH
+   
+   Issue: No database integration; scraped tweets are processed in memory
+   and not stored for historical analysis.
+   
+   Impact: Cannot track trends over time; each analysis starts fresh.
+
+MODERATE ISSUES:
+----------------
+
+5. RATE LIMITING & API QUOTAS
+   Severity: MEDIUM
+   
+   Issue: Azure OpenAI API has quota limits; Gemini API previously hit
+   quota exceeded errors. No retry logic with exponential backoff.
+   
+   Impact: Competitor analysis may fail during high usage periods.
+
+6. SIMULATED/PLACEHOLDER DATA
+   Severity: MEDIUM
+   
+   Issue: Several metrics use random/simulated values:
+   - engagement_rate: random.uniform(2.5, 8.5) - Line 194 in main.py
+   - Volume over time falls back to random data on timestamp parse failure
+   - Historical time comparison data for competitors is simulated
+   
+   Impact: Users may make decisions based on inaccurate metrics.
+
+7. LOCALHOST-ONLY CONFIGURATION
+   Severity: MEDIUM
+   
+   Issue: Frontend API_BASE_URL is hardcoded to 'http://localhost:8000'
+   
+   Impact: Cannot connect to remote backend; deployment requires code changes.
+
+8. NO AUTHENTICATION/AUTHORIZATION
+   Severity: MEDIUM
+   
+   Issue: API endpoints have no authentication. Anyone with access to the
+   backend URL can make requests.
+   
+   Impact: No multi-tenancy; no user-specific data; potential abuse.
+
+9. LIMITED COMPLAINT CATEGORIZATION
+   Severity: LOW
+   
+   Issue: Complaint categories use simple keyword matching, which may
+   miss context-dependent complaints or mis-categorize tweets.
+   
+   Impact: Inaccurate complaint distribution statistics.
+
+10. LONG TIMEOUT VALUES
+    Severity: LOW
+    
+    Issue: API timeout is set to 20 minutes (1200000ms) for scraping.
+    
+    Impact: Poor user experience; potential resource exhaustion.
+
+11. WINDOWS-SPECIFIC PATHS
+    Severity: LOW
+    
+    Issue: Chrome profile path is Windows-specific:
+    "C:\Users\QuadriAkanbi\AppData\Local\Google\Chrome\User Data - Copy"
+    
+    Impact: Cannot run on macOS/Linux without code modification.
+
+================================================================================
+              5. RECOMMENDATIONS FOR PRODUCTION READINESS
+================================================================================
+
+PRIORITY 1 - SECURITY FIXES:
+----------------------------
+
+1. REMOVE HARDCODED CREDENTIALS
+   - Move API keys to environment variables
+   - Use a secrets manager (Azure Key Vault, AWS Secrets Manager)
+   - Add .env file support with python-dotenv
+   - Never commit credentials to version control
+
+2. IMPLEMENT AUTHENTICATION
+   - Add JWT-based authentication
+   - Create user accounts with API key management
+   - Implement rate limiting per user/API key
+
+PRIORITY 2 - SCRAPING RELIABILITY:
+----------------------------------
+
+3. REPLACE SELENIUM WITH OFFICIAL API
+   Option A: Twitter/X API
+   - Apply for Twitter API access (Basic/Pro tier)
+   - Use tweepy library for official API integration
+   - More reliable, rate-limit friendly
+   
+   Option B: Third-Party Data Providers
+   - RapidAPI Twitter endpoints
+   - Social media monitoring APIs (Brandwatch, Sprinklr)
+   
+   Option C: Alternative Data Sources
+   - Nitter instances (open-source Twitter frontend)
+   - Social media aggregator APIs
+
+4. IMPLEMENT ROBUST ERROR HANDLING
+   - Add retry logic with exponential backoff
+   - Circuit breaker pattern for external API calls
+   - Graceful degradation when scraping fails
+
+PRIORITY 3 - ARCHITECTURE IMPROVEMENTS:
+---------------------------------------
+
+5. ADD DATABASE LAYER
+   - PostgreSQL or MongoDB for storing:
+     * Scraped tweets
+     * Analysis results
+     * User configurations
+     * Historical trends
+   - Enable time-series analysis
+
+6. CONTAINERIZE APPLICATION
+   - Create Docker images for backend
+   - Remove dependency on local Chrome profile
+   - Use headless browser in container
+   - Define docker-compose for local development
+
+7. IMPLEMENT CACHING
+   - Redis for caching scraper results
+   - Cache AI model predictions
+   - Reduce API calls to Azure OpenAI
+
+8. QUEUE-BASED PROCESSING
+   - Use Celery/Redis for async scraping jobs
+   - Return job ID immediately, poll for results
+   - Better handling of long-running operations
+
+PRIORITY 4 - FEATURE IMPROVEMENTS:
+----------------------------------
+
+9. IMPROVE SENTIMENT ANALYSIS
+   - Fine-tune RoBERTa on Nigerian English/pidgin
+   - Add aspect-based sentiment analysis
+   - Detect sarcasm and irony
+
+10. ENHANCE COMPLAINT CATEGORIZATION
+    - Use NLP-based classification (not just keywords)
+    - Train custom classifier on labeled complaint data
+    - Add emerging issue detection
+
+11. ADD REAL ENGAGEMENT METRICS
+    - Capture likes, retweets, replies from Twitter API
+    - Calculate actual engagement rates
+    - Track influencer mentions
+
+================================================================================
+                        6. FUTURE ENHANCEMENTS
+================================================================================
+
+SHORT-TERM (1-3 Months):
+------------------------
+- Implement official Twitter API integration
+- Add user authentication system
+- Create database schema and migrations
+- Build admin dashboard for monitoring
+- Add email/Slack alerts for sentiment drops
+
+MEDIUM-TERM (3-6 Months):
+-------------------------
+- Multi-language sentiment support (Hausa, Yoruba, Pidgin)
+- Influencer identification and tracking
+- Automated report generation (PDF/Excel)
+- Scheduled monitoring (daily/weekly analysis)
+- Historical trend analysis and forecasting
+
+LONG-TERM (6-12 Months):
+------------------------
+- Multi-platform support (Instagram, Facebook, TikTok)
+- Custom AI model training per client
+- Integration with CRM systems (Salesforce, HubSpot)
+- API marketplace for third-party developers
+- White-label solution for agencies
+
+================================================================================
+                              CONCLUSION
+================================================================================
+
+The Sentiment Analyser demonstrates a solid proof-of-concept for AI-powered 
+social media monitoring. The core functionality - scraping tweets, analyzing 
+sentiment with RoBERTa, and identifying competitors - works in a local 
+development environment.
+
+However, significant architectural changes are required before production 
+deployment, particularly around:
+
+1. Data collection reliability (moving from Selenium to official APIs)
+2. Security (credential management, authentication)
+3. Scalability (database, containerization, cloud deployment)
+
+With the recommended improvements, this solution could serve as a valuable
+tool for Nigerian brands seeking to understand and improve their public
+perception in real-time.
+
+================================================================================
+Document prepared for Quadri Akanbi
+Last Updated: January 7, 2026
+================================================================================
