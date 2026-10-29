@@ -193,7 +193,7 @@ export function useSearchManager() {
       }));
 
       // Call our FastAPI backend (with built-in simulated fallback)
-      const results: SearchResults = await analyzeAll(request);
+      const results: SearchResults = await analyzeAll(request, abortRef.current?.signal);
 
       // Persist results & update dashboard
       const searchId = crypto.randomUUID();

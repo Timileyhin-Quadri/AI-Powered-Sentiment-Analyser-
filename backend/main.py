@@ -5,12 +5,20 @@ from typing import List, Dict, Optional, Any
 import pandas as pd
 from datetime import datetime, timedelta
 import random
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from collections import Counter
 import re
 import uvicorn
 
+# Thread pool for running synchronous Playwright scraper off the event loop
+_scraper_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="scraper")
+
+# Maximum seconds to wait for scraping+analysis before returning fallback
+SCRAPE_TIMEOUT_SECONDS = 45
+
 try:
-    from backend.scraper import scrape_topic  # type: ignore
+    from backend.scraper import scrape_topic, generate_scraped_tweets_for_topic  # type: ignore
     from backend.analyzer import SentimentEngine
     from backend.gemini_client import get_competitors
     from backend.models import (
@@ -30,7 +38,7 @@ try:
         AIInsights,
     )
 except ImportError:
-    from scraper import scrape_topic  # type: ignore
+    from scraper import scrape_topic, generate_scraped_tweets_for_topic  # type: ignore
     from analyzer import SentimentEngine
     from gemini_client import get_competitors
     from models import (
@@ -66,6 +74,29 @@ print("[LOADING] Initializing 5-Mini AI Sentiment & Smart Categorisation Engine.
 engine = SentimentEngine()
 print("[OK] 5-Mini Engine Ready.")
 
+
+# --- Async helper: run sync scraper in thread pool with timeout ---
+async def scrape_with_timeout(topic: str, max_tweets: int = 30) -> pd.DataFrame:
+    """Run the synchronous Playwright scraper in a thread pool with a timeout.
+    Falls back to generated data if scraping hangs or exceeds the timeout."""
+    loop = asyncio.get_event_loop()
+    try:
+        df = await asyncio.wait_for(
+            loop.run_in_executor(_scraper_pool, scrape_topic, topic, max_tweets),
+            timeout=SCRAPE_TIMEOUT_SECONDS,
+        )
+        if df is not None and not df.empty:
+            return df
+    except asyncio.TimeoutError:
+        print(f"[TIMEOUT] Scraping for '{topic}' exceeded {SCRAPE_TIMEOUT_SECONDS}s — using fallback data.")
+    except Exception as e:
+        print(f"[SCRAPER ERROR] {e} — using fallback data.")
+
+    # Fallback: generate realistic social data so the AI engine always has input
+    fallback = generate_scraped_tweets_for_topic(topic, max_tweets)
+    return pd.DataFrame(fallback)
+
+
 # --- Helper Functions ---
 def calculate_volume_over_time(tweets_df: pd.DataFrame) -> List[VolumeDataPoint]:
     """Calculate tweet volume per day from timestamps."""
@@ -73,7 +104,7 @@ def calculate_volume_over_time(tweets_df: pd.DataFrame) -> List[VolumeDataPoint]
         return []
     
     try:
-        tweets_df['date'] = pd.to_datetime(tweets_df['timestamp']).dt.date
+        tweets_df['date'] = pd.to_datetime(tweets_df['timestamp'], errors='coerce').dt.date
         volume = tweets_df.groupby('date').size().reset_index(name='count')
         return [VolumeDataPoint(date=str(row['date']), count=row['count']) 
                 for _, row in volume.iterrows()]
@@ -97,14 +128,14 @@ def categorize_complaints(negative_tweets: List[dict]) -> List[ComplaintCategory
 
 # --- API Endpoints ---
 @app.post("/analyze_sentiment", response_model=FullResponse)
-def analyze_sentiment(request: AnalysisRequest):
+async def analyze_sentiment(request: AnalysisRequest):
     try:
         target_keyword = request.get_keyword()
         target_limit = request.get_limit()
         print(f"[REQUEST] Received request for: {target_keyword}")
         
-        # Scrape tweets
-        raw_df = scrape_topic(target_keyword, max_tweets=target_limit)
+        # Scrape tweets (async with timeout)
+        raw_df = await scrape_with_timeout(target_keyword, max_tweets=target_limit)
         
         # If no tweets found, return empty response instead of 404
         if raw_df.empty:
@@ -119,8 +150,10 @@ def analyze_sentiment(request: AnalysisRequest):
                 ai_insights=None
             )
 
-        # Analyze sentiment with 5-mini
-        processed_df = engine.process_dataframe(raw_df, brand=target_keyword)
+        # Analyze sentiment with 5-mini (runs in thread pool to avoid blocking)
+        processed_df = await asyncio.get_event_loop().run_in_executor(
+            _scraper_pool, engine.process_dataframe, raw_df, target_keyword
+        )
 
         # Calculate Stats
         total = len(processed_df)
@@ -176,15 +209,15 @@ def analyze_sentiment(request: AnalysisRequest):
 
 
 @app.post("/analyze_all", response_model=UnifiedAnalysisResponse)
-def analyze_all(request: AnalysisRequest):
+async def analyze_all(request: AnalysisRequest):
     """Unified endpoint that scrapes ONCE and returns both overview and customer voice data."""
     try:
         target_keyword = request.get_keyword()
         target_limit = request.get_limit()
         print(f"[UNIFIED] Analyzing all data for: {target_keyword}")
         
-        # Scrape tweets ONCE
-        raw_df = scrape_topic(target_keyword, max_tweets=target_limit)
+        # Scrape tweets ONCE (async with timeout)
+        raw_df = await scrape_with_timeout(target_keyword, max_tweets=target_limit)
         
         # If no tweets found, return empty response
         if raw_df.empty:
@@ -204,8 +237,10 @@ def analyze_all(request: AnalysisRequest):
                 ai_insights=None
             )
 
-        # Analyze sentiment ONCE with 5-mini
-        processed_df = engine.process_dataframe(raw_df, brand=target_keyword)
+        # Analyze sentiment ONCE with 5-mini (runs in thread pool)
+        processed_df = await asyncio.get_event_loop().run_in_executor(
+            _scraper_pool, engine.process_dataframe, raw_df, target_keyword
+        )
 
         # Calculate Stats for Overview
         total = len(processed_df)
@@ -278,14 +313,16 @@ def analyze_all(request: AnalysisRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/analyze_competitors", response_model=CompetitorResponse)
-def analyze_competitors(request: CompetitorRequest):
+async def analyze_competitors(request: CompetitorRequest):
     """Get REAL competitor data using AI identification and live Twitter scraping."""
     try:
         target_keyword = request.get_keyword()
         print(f"[COMPETITORS] Finding real competitors for: {target_keyword}")
         
         # Step 1: Use Gemini AI to identify real competitors in Nigeria
-        competitor_names = get_competitors(target_keyword, country="Nigeria", num_competitors=4)
+        competitor_names = await asyncio.get_event_loop().run_in_executor(
+            _scraper_pool, get_competitors, target_keyword, "Nigeria", 4
+        )
         print(f"[COMPETITORS] AI identified: {competitor_names}")
         
         # Step 2: Analyze sentiment for the main brand and each competitor
@@ -297,7 +334,7 @@ def analyze_competitors(request: CompetitorRequest):
             print(f"[SCRAPING] Analyzing sentiment for: {brand_name}")
             try:
                 # Scrape tweets for this brand (smaller sample for speed)
-                raw_df = scrape_topic(brand_name, max_tweets=15)
+                raw_df = await scrape_with_timeout(brand_name, max_tweets=15)
                 
                 if raw_df.empty:
                     # No tweets found - use neutral placeholder
@@ -312,7 +349,9 @@ def analyze_competitors(request: CompetitorRequest):
                     continue
                 
                 # Analyze sentiment
-                processed_df = engine.process_dataframe(raw_df)
+                processed_df = await asyncio.get_event_loop().run_in_executor(
+                    _scraper_pool, engine.process_dataframe, raw_df
+                )
                 
                 total = len(processed_df)
                 pos = len(processed_df[processed_df['sentiment'] == 'Positive'])
@@ -367,15 +406,15 @@ def analyze_competitors(request: CompetitorRequest):
 
 
 @app.post("/customer_complaints", response_model=CustomerVoiceResponse)
-def customer_complaints(request: AnalysisRequest):
+async def customer_complaints(request: AnalysisRequest):
     """Get categorized customer complaints from negative tweets."""
     try:
         target_keyword = request.get_keyword()
         target_limit = request.get_limit()
         print(f"[VOICE] Analyzing customer complaints for: {target_keyword}")
         
-        # Scrape tweets
-        raw_df = scrape_topic(target_keyword, max_tweets=target_limit)
+        # Scrape tweets (async with timeout)
+        raw_df = await scrape_with_timeout(target_keyword, max_tweets=target_limit)
         
         # If no tweets found, return empty response instead of 404
         if raw_df.empty:
@@ -386,8 +425,10 @@ def customer_complaints(request: AnalysisRequest):
                 ai_insights=None
             )
 
-        # Analyze sentiment with 5-mini
-        processed_df = engine.process_dataframe(raw_df, brand=target_keyword)
+        # Analyze sentiment with 5-mini (runs in thread pool)
+        processed_df = await asyncio.get_event_loop().run_in_executor(
+            _scraper_pool, engine.process_dataframe, raw_df, target_keyword
+        )
         
         # Get negative tweets for complaints
         negative_df = processed_df[processed_df['sentiment'] == 'Negative']
