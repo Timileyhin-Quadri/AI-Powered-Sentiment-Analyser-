@@ -104,7 +104,7 @@ def calculate_volume_over_time(tweets_df: pd.DataFrame) -> List[VolumeDataPoint]
         return []
     
     try:
-        tweets_df['date'] = pd.to_datetime(tweets_df['timestamp'], errors='coerce').dt.date
+        tweets_df['date'] = pd.to_datetime(tweets_df['timestamp'], format='mixed', errors='coerce').dt.date
         volume = tweets_df.groupby('date').size().reset_index(name='count')
         return [VolumeDataPoint(date=str(row['date']), count=row['count']) 
                 for _, row in volume.iterrows()]
