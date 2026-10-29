@@ -1,74 +1,53 @@
-import time
-import json
+#!/usr/bin/env python
+# export_cookies.py - User-facing script to log in once and save session cookies
+import sys
 import os
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.options import Options
 
-def export_cookies():
-    """
-    Launches a browser for the user to log in, then saves cookies to cookies.json.
-    """
-    print("🚀 Initializing WebDriver for Cookie Export...")
-    
-    # Setup Chrome options
-    chrome_options = Options()
-    chrome_options.add_argument("--start-maximized")
-    
-    # Use the existing "Copy" profile that we know works/has history
-    # This avoids the "New Login" detection triggers
-    chrome_options.add_argument(r"--user-data-dir=C:\Users\QuadriAkanbi\AppData\Local\Google\Chrome\User Data - Copy") 
-    chrome_options.add_argument(r"--profile-directory=Default")
+# Add root directory to path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-    # Anti-detection flags
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
-    
-    # Fake User Agent
-    user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    chrome_options.add_argument(f'user-agent={user_agent}')
-    # We don't use the profile here because we want a fresh session to capture the login
-    # OR we can use the profile to make it easier, but let's try to capture a fresh valid session
-    # actually, using the profile is better if they are already logged in there.
-    # But the user wants to move to Docker, so a clean export is best.
-    
-    try:
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        
-        print("\n" + "="*60)
-        print("🛑 ACTION REQUIRED")
-        print("1. The browser has opened.")
-        print("2. Please log in to Twitter (x.com) manually.")
-        print("3. Once you are on the home timeline, come back here.")
-        print("="*60 + "\n")
-        
-        driver.get("https://twitter.com/i/flow/login")
-        
-        # Wait for user to log in
-        input("⌨️  Press ENTER here after you have successfully logged in and can see your timeline... ")
-        
-        # Get cookies
-        cookies = driver.get_cookies()
-        
-        if not cookies:
-            print("❌ No cookies found. Did you log in?")
-            return
-            
-        # Save to file
-        with open("cookies.json", "w") as f:
-            json.dump(cookies, f, indent=4)
-            
-        print(f"\n✅ Success! {len(cookies)} cookies saved to 'cookies.json'.")
-        print("You can now use these cookies with the scraper in Docker.")
-        
-    except Exception as e:
-        print(f"❌ Error: {e}")
-    finally:
-        if 'driver' in locals():
-            driver.quit()
+from backend.session_manager import (
+    interactive_manual_login,
+    check_saved_session,
+    export_from_cdp_session,
+    is_cdp_port_open
+)
 
 if __name__ == "__main__":
-    export_cookies()
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Twitter/X Initial Login & Session Cookie Saver",
+        epilog="Once saved to cookies.json, future scraping runs will not require logging in again."
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Check if valid session cookies are already saved"
+    )
+    parser.add_argument(
+        "--from-cdp",
+        action="store_true",
+        help="Extract session cookies directly from your open Chrome (debugging port 9222)"
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="Timeout in seconds to wait for manual login (default: 300s / 5 minutes)"
+    )
+
+    args = parser.parse_args()
+
+    if args.check:
+        status = check_saved_session()
+        print("\n--- Session Cookie Status ---")
+        print(f"Session Saved:   {status['saved']}")
+        print(f"Has auth_token:  {status['has_auth_token']}")
+        print(f"Total Cookies:   {status['cookie_count']}")
+        print(f"Cookies File:    {status['cookies_path']}")
+        print(f"Status Message:  {status['message']}\n")
+    elif args.from_cdp:
+        print("Extracting cookies from active Chrome on port 9222...")
+        export_from_cdp_session(verbose=True)
+    else:
+        interactive_manual_login(timeout_seconds=args.timeout)

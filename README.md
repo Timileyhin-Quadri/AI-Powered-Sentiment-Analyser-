@@ -121,42 +121,62 @@ venv\Scripts\activate
 source venv/bin/activate
 
 # Install dependencies
-pip install -r senti/requirements.txt
-
-# Install python-dotenv for environment variables
-pip install python-dotenv
+pip install -r requirements.txt
 ```
 
-#### 3. Set Up Frontend (React Native)
+#### 3. Set Up Frontend (Modern React Web App)
 
 ```bash
-cd SentimentApp
+cd frontend
 
 # Install dependencies
 npm install
 
-# Or with yarn
-yarn install
+# Start development server
+npm run dev
+# The application will launch at http://localhost:8080
 ```
+
+> **Guest Mode Available:** You can immediately explore all dashboard features without entering Supabase credentials by clicking **"Continue as Guest / Demo Mode"** on the login screen.
+
 
 ### Configuration
 
 #### 1. Create Environment File
 
-Create a `.env` file in the `senti/` directory:
+Create a `.env` file in the project root directory:
 
 ```bash
-# Azure OpenAI Credentials
-AZURE_OPENAI_API_KEY=your_azure_api_key_here
-AZURE_OPENAI_ENDPOINT=https://your-resource-name.cognitiveservices.azure.com/
-AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o
-AZURE_OPENAI_API_VERSION=2024-12-01-preview
+# Azure AI Foundry / OpenAI Credentials
+api_key=your_azure_api_key_here
+api_endpoint=https://your-resource.services.ai.azure.com/
+model=gpt-5-mini
+model_version=2024-12-01-preview
 
-# Chrome Profile Path (Windows example)
-CHROME_PROFILE_PATH=C:\Users\YourUsername\AppData\Local\Google\Chrome\User Data
+# Chrome Debugging Port for Playwright CDP
+CHROME_CDP_URL=http://localhost:9222
 ```
 
-#### 2. Get Your Azure OpenAI Keys
+#### 2. Initial Manual Login & Saving Session Cookies (One-Time Setup)
+
+To allow the scraper to fetch live Twitter data without bot detection triggers or repeated logins:
+
+```bash
+# Option A: Interactive Manual Login
+# Opens a clean browser window. Log in to X/Twitter once.
+# As soon as you reach your home timeline, cookies are automatically captured!
+python export_cookies.py
+
+# Option B: Capture from active Chrome (if running with --remote-debugging-port=9222)
+python export_cookies.py --from-cdp
+
+# Verify saved session cookies
+python export_cookies.py --check
+```
+
+Once saved to `cookies.json` and `session_state.json`, future searches and scraping workflows will reuse the cached session automatically.
+
+#### 3. Get Your Azure OpenAI Keys
 
 1. Visit [Azure Portal](https://portal.azure.com)
 2. Navigate to your OpenAI resource
@@ -236,68 +256,54 @@ curl -X POST "http://localhost:8000/customer_complaints" \
 ### Running the Backend
 
 ```bash
-cd senti/backend
+# Option 1: Run directly from project root
+uvicorn backend.main:app --reload --port 8000
 
-# Start the FastAPI server
+# Option 2: Run from within backend directory
+cd backend
 python main.py
-
-# Or using uvicorn directly
-uvicorn main:app --reload
 ```
 
 Server will be available at: `http://localhost:8000`
 
 API documentation: `http://localhost:8000/docs`
 
-### Mobile App
+### Running the Frontend (Web Dashboard)
 
 ```bash
-cd SentimentApp
-
-# For iOS (macOS only)
-npm run ios
-
-# For Android
-npm run android
-
-# For web preview
-npm run web
-
-# Or with Expo Go
-expo start
+cd frontend
+npm run dev
 ```
+
+Dashboard will be available at: `http://localhost:8080`
 
 ---
 
 ## 📁 Project Structure
 
 ```
-Sentiment Analyser/
-├── senti/                          # Backend application
-│   ├── backend/
-│   │   ├── main.py                 # FastAPI application & endpoints
-│   │   ├── analyzer.py             # RoBERTa sentiment analysis engine
-│   │   ├── scraper.py              # Twitter scraping logic
-│   │   ├── gemini_client.py         # Azure OpenAI integration
-│   │   └── requirements.txt         # Python dependencies
-│   ├── ui/
-│   │   └── streamlit.py             # Alternative Streamlit UI
-│   └── .env                         # Environment variables (⚠️ Keep secret!)
+AI-Powered-Sentiment-Analyser/
+├── backend/                         # FastAPI AI & Scraping Backend
+│   ├── main.py                      # FastAPI endpoints & CORS
+│   ├── analyzer.py                  # gpt-5-mini sentiment & smart categorisation engine
+│   ├── scraper.py                   # Playwright CDP scraper (port 9222) & robust fallback
+│   ├── gemini_client.py             # Competitor intelligence & Azure AI Foundry client
+│   ├── models.py                    # Pydantic schemas & response models
+│   └── __init__.py                  # Package exports
 │
-├── SentimentApp/                    # Mobile app (React Native)
-│   ├── app/                         # Main screens
-│   │   ├── index.tsx
-│   │   ├── competitors.tsx
-│   │   └── customer-voice.tsx
-│   ├── components/                  # Reusable components
-│   ├── services/                    # API client services
-│   ├── context/                     # State management
-│   └── package.json
+├── frontend/                        # Modern React Web App
+│   ├── src/
+│   │   ├── pages/                   # Search, Complaints, Competitors, Settings, Mentions
+│   │   ├── components/              # UI components, ComplaintPanel, Charts, Layout
+│   │   ├── lib/api/                 # sentimentApi client
+│   │   └── types/                   # TypeScript interfaces
+│   ├── package.json
+│   └── vite.config.ts
 │
-├── .env                             # Environment variables (ignored)
+├── requirements.txt                 # Backend Python dependencies
+├── .env                             # Environment secrets (Azure credentials, CDP port)
 ├── .gitignore                       # Git ignore rules
-├── README.md                        # This file
-└── LICENSE                          # MIT License
+└── README.md                        # Documentation
 ```
 
 ---
@@ -315,13 +321,16 @@ Sentiment Analyser/
 | **Azure OpenAI** | Competitor identification (GPT-4o) |
 | **Uvicorn** | ASGI server |
 
-### Frontend
+### Frontend (Web)
 | Technology | Purpose |
 |-----------|---------|
-| **React Native** | Cross-platform mobile app |
-| **Expo** | React Native development platform |
-| **TypeScript** | Type-safe JavaScript |
-| **Axios** | HTTP client |
+| **React 18** | UI framework |
+| **Vite** | Fast bundler & dev server |
+| **TypeScript** | Type-safe development |
+| **Tailwind CSS & Radix UI** | Modern design system & accessible components |
+| **Lucide Icons** | Vector iconography |
+| **Recharts** | Interactive sentiment & volume data visualizations |
+| **TanStack Query** | Async state management |
 
 ### DevOps & Tools
 | Tool | Purpose |
@@ -336,22 +345,24 @@ Sentiment Analyser/
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Mobile Application                        │
-│                   (React Native + Expo)                      │
-└────────────────────────┬────────────────────────────────────┘
-                         │ HTTP/REST API
-                         ▼
+│                    Web Application (React + Vite)            │
+│  ┌───────────────┬─────────────────┬──────────────────────┐ │
+│  │ Dashboard     │ Search Center   │ Competitor Intel     │ │
+│  ├───────────────┼─────────────────┼──────────────────────┤ │
+│  │ Complaints    │ Analytics       │ Real-time Alerts     │ │
+│  └───────────────┴─────────────────┴──────────────────────┘ │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ HTTP / JSON API (Port 8000)
+                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    FastAPI Backend                           │
+│                     FastAPI Backend                          │
 │  ┌─────────────┬──────────────┬─────────────────────────┐   │
 │  │             │              │                         │   │
 │  ▼             ▼              ▼                         ▼   │
 │ Scraper    Analyzer        Competitors           Data Mgmt  │
-│ (Selenium) (RoBERTa)      (Azure OpenAI)        (Pandas)   │
+│ (Selenium) (RoBERTa)      (Gemini / GPT)        (Pandas)    │
+│  (Twitter)  (CardiffNLP)                                    │
 └─────────────────────────────────────────────────────────────┘
-       │              │                    │
-       ▼              ▼                    ▼
-    Twitter/X   ML Model Cache      Azure Services
 ```
 
 ---

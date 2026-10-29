@@ -26,6 +26,7 @@ wheels/
 *.egg
 
 # Virtual environments
+.venv/
 venv/
 ENV/
 env/
@@ -54,9 +55,16 @@ chrome_scraper_profile/
 # Data files (optional - adjust as needed)
 *.csv
 
-# React/Node (SentimentApp is a separate project)
+# React/Node
+node_modules/
+dist/
+frontend/node_modules/
+frontend/dist/
 SentimentApp/node_modules/
 SentimentApp/.expo/
 SentimentApp/dist/
 SentimentApp/.next/
-SentimentApp/build/
+# Session & Authentication Cookies (Keep private!)
+cookies.json
+session_state.json
+*.session.json

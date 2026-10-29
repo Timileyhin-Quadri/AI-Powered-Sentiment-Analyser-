@@ -1,0 +1,7 @@
+project_id = "kmiikybkejggpdpsnllr"
+
+[functions.analyze-sentiment]
+verify_jwt = false
+
+[functions.fetch-twitter]
+verify_jwt = false
