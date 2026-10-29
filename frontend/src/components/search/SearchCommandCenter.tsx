@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Search, ChevronDown, ChevronUp, Bookmark, Twitter, Instagram, Facebook, Linkedin, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -28,6 +28,7 @@ const platforms: { value: Platform; label: string; icon: React.ElementType; colo
 export function SearchCommandCenter({ onSearch, onSave, isSearching, initialRequest }: SearchCommandCenterProps) {
   const keywordRef = useRef<KeywordInputHandle>(null);
   const [keywords, setKeywords] = useState<string[]>(initialRequest?.keywords || []);
+  const [pendingText, setPendingText] = useState('');
   const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>(
     initialRequest?.platforms || ['twitter', 'instagram', 'facebook', 'linkedin']
   );
@@ -36,6 +37,19 @@ export function SearchCommandCenter({ onSearch, onSave, isSearching, initialRequ
   const [includeComments, setIncludeComments] = useState(true);
   const [includeRetweets, setIncludeRetweets] = useState(true);
   const [language, setLanguage] = useState('en');
+
+  // Sync with initialRequest when templates or rerun are triggered
+  useEffect(() => {
+    if (initialRequest?.keywords && initialRequest.keywords.length > 0) {
+      setKeywords(initialRequest.keywords);
+    }
+    if (initialRequest?.platforms && initialRequest.platforms.length > 0) {
+      setSelectedPlatforms(initialRequest.platforms);
+    }
+    if (initialRequest?.maxPosts) {
+      setMaxPosts(initialRequest.maxPosts);
+    }
+  }, [initialRequest]);
 
   const togglePlatform = (platform: Platform) => {
     setSelectedPlatforms((prev) =>
@@ -47,8 +61,8 @@ export function SearchCommandCenter({ onSearch, onSave, isSearching, initialRequ
 
   const selectAll = () => setSelectedPlatforms(['twitter', 'instagram', 'facebook', 'linkedin']);
 
-  const buildRequest = (): SearchRequest => ({
-    keywords,
+  const buildRequest = (effectiveKeywords: string[]): SearchRequest => ({
+    keywords: effectiveKeywords,
     maxPosts,
     platforms: selectedPlatforms,
     includeComments,
@@ -57,12 +71,19 @@ export function SearchCommandCenter({ onSearch, onSave, isSearching, initialRequ
   });
 
   const handleSearch = () => {
-    // Flush any pending typed text into keywords
-    const pending = keywordRef.current?.flush() || '';
-    const effectiveKeywords = pending && !keywords.includes(pending)
-      ? [...keywords, pending]
-      : keywords;
+    // Flush any pending typed text or use pendingText state
+    const flushed = keywordRef.current?.flush() || '';
+    const candidate = (flushed || pendingText).trim();
+
+    let effectiveKeywords = [...keywords];
+    if (candidate && !effectiveKeywords.includes(candidate)) {
+      effectiveKeywords.push(candidate);
+      setKeywords(effectiveKeywords);
+      setPendingText('');
+    }
+
     if (effectiveKeywords.length === 0 || selectedPlatforms.length === 0) return;
+
     onSearch({
       keywords: effectiveKeywords,
       maxPosts,
@@ -73,6 +94,7 @@ export function SearchCommandCenter({ onSearch, onSave, isSearching, initialRequ
     });
   };
 
+  const hasValidInput = keywords.length > 0 || pendingText.trim().length > 0;
   const totalEstimate = selectedPlatforms.length * maxPosts;
 
   return (
@@ -91,51 +113,72 @@ export function SearchCommandCenter({ onSearch, onSave, isSearching, initialRequ
       {/* Keyword Input */}
       <div className="space-y-2">
         <Label className="text-sm font-medium">Keywords</Label>
-        <KeywordInput ref={keywordRef} keywords={keywords} onChange={setKeywords} />
+        <KeywordInput
+          ref={keywordRef}
+          keywords={keywords}
+          onChange={setKeywords}
+          onPendingTextChange={setPendingText}
+        />
       </div>
 
       {/* Platform Selection */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <Label className="text-sm font-medium">Platforms</Label>
-          <Button variant="ghost" size="sm" className="text-xs h-7" onClick={selectAll}>
+          <button
+            onClick={selectAll}
+            className="text-xs font-medium text-primary hover:underline"
+          >
             Select All
-          </Button>
+          </button>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {platforms.map((p) => {
-            const selected = selectedPlatforms.includes(p.value);
+            const isSelected = selectedPlatforms.includes(p.value);
             const Icon = p.icon;
             return (
               <button
                 key={p.value}
                 onClick={() => togglePlatform(p.value)}
                 className={cn(
-                  'flex items-center gap-2 rounded-lg border p-3 transition-all',
-                  selected
-                    ? 'border-primary bg-primary/5 shadow-sm'
-                    : 'border-border bg-background hover:border-muted-foreground/30'
+                  'flex items-center gap-2.5 rounded-lg border p-3 text-sm font-medium transition-all',
+                  isSelected
+                    ? 'border-primary/50 bg-primary/5 text-foreground shadow-sm'
+                    : 'border-border bg-secondary/30 text-muted-foreground hover:bg-secondary/60'
                 )}
               >
-                <Checkbox checked={selected} className="pointer-events-none" />
+                <Checkbox
+                  checked={isSelected}
+                  onCheckedChange={() => togglePlatform(p.value)}
+                  className="data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                />
                 <Icon className={cn('h-4 w-4', p.colorClass)} />
-                <span className="text-sm font-medium text-foreground">{p.label}</span>
+                <span>{p.label}</span>
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* Posts Per Platform */}
+      {/* Posts per platform slider */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <Label className="text-sm font-medium">Posts per platform</Label>
-          <span className="text-sm font-semibold text-foreground">{maxPosts}</span>
+          <span className="text-sm font-semibold font-mono text-foreground">{maxPosts}</span>
         </div>
-        <Slider value={[maxPosts]} onValueChange={([v]) => setMaxPosts(v)} min={10} max={100} step={5} />
-        <p className="text-xs text-muted-foreground">
-          Estimated total: <span className="font-medium text-foreground">{totalEstimate} posts</span> across {selectedPlatforms.length} platform{selectedPlatforms.length !== 1 ? 's' : ''}
-        </p>
+        <Slider
+          value={[maxPosts]}
+          onValueChange={([val]) => setMaxPosts(val)}
+          min={10}
+          max={100}
+          step={10}
+          className="w-full"
+        />
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>10 (Quick scan)</span>
+          <span>Estimated total: {totalEstimate} posts across {selectedPlatforms.length} platforms</span>
+          <span>100 (Deep dive)</span>
+        </div>
       </div>
 
       {/* Advanced Options */}
@@ -184,7 +227,7 @@ export function SearchCommandCenter({ onSearch, onSave, isSearching, initialRequ
           className="flex-1 gap-2"
           size="lg"
           onClick={handleSearch}
-          disabled={isSearching || keywords.length === 0 || selectedPlatforms.length === 0}
+          disabled={isSearching || !hasValidInput || selectedPlatforms.length === 0}
         >
           <Zap className="h-4 w-4" />
           {isSearching ? 'Analyzing...' : 'Start Analysis'}
@@ -192,8 +235,11 @@ export function SearchCommandCenter({ onSearch, onSave, isSearching, initialRequ
         <Button
           variant="outline"
           size="lg"
-          onClick={() => onSave(buildRequest())}
-          disabled={keywords.length === 0}
+          onClick={() => {
+            const eff = keywords.length > 0 ? keywords : (pendingText.trim() ? [pendingText.trim()] : []);
+            if (eff.length > 0) onSave(buildRequest(eff));
+          }}
+          disabled={!hasValidInput}
           className="gap-2"
         >
           <Bookmark className="h-4 w-4" />

@@ -16,23 +16,23 @@ interface SearchHistoryProps {
 const templates: { label: string; description: string; request: SearchRequest }[] = [
   {
     label: 'Brand Monitoring',
-    description: 'All platforms, 50 posts',
-    request: { keywords: [], maxPosts: 50, platforms: ['twitter', 'instagram', 'facebook', 'linkedin'] },
+    description: 'GTBank • 50 posts',
+    request: { keywords: ['GTBank'], maxPosts: 50, platforms: ['twitter', 'instagram', 'facebook', 'linkedin'] },
   },
   {
     label: 'Competitor Check',
-    description: 'Twitter + LinkedIn, 30 posts',
-    request: { keywords: [], maxPosts: 30, platforms: ['twitter', 'linkedin'] },
+    description: 'Access Bank • 30 posts',
+    request: { keywords: ['Access Bank'], maxPosts: 30, platforms: ['twitter', 'linkedin'] },
   },
   {
     label: 'Crisis Detection',
-    description: 'All platforms, 100 posts',
-    request: { keywords: [], maxPosts: 100, platforms: ['twitter', 'instagram', 'facebook', 'linkedin'] },
+    description: 'MTN Nigeria • 50 posts',
+    request: { keywords: ['MTN Nigeria'], maxPosts: 50, platforms: ['twitter', 'instagram', 'facebook', 'linkedin'] },
   },
   {
     label: 'Campaign Analysis',
-    description: 'Instagram + Facebook, 50 posts',
-    request: { keywords: [], maxPosts: 50, platforms: ['instagram', 'facebook'] },
+    description: 'Flutterwave • 50 posts',
+    request: { keywords: ['Flutterwave'], maxPosts: 50, platforms: ['instagram', 'facebook'] },
   },
 ];
 
@@ -98,7 +98,7 @@ export function SearchHistory({ history, onRerun, onRemove, onClear }: SearchHis
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onRerun(entry.request)}>
                     <RotateCcw className="h-3.5 w-3.5" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={() => onRemove(entry.id)}>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => onRemove(entry.id)}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>

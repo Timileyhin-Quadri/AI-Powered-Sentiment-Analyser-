@@ -1,7 +1,8 @@
-import { useState, useImperativeHandle, forwardRef, KeyboardEvent } from 'react';
-import { X } from 'lucide-react';
+import { useState, useImperativeHandle, forwardRef, KeyboardEvent, useEffect } from 'react';
+import { X, Plus } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 
 export interface KeywordInputHandle {
   /** Flushes pending text into keywords. Returns the pending text (or empty string). */
@@ -11,16 +12,27 @@ export interface KeywordInputHandle {
 interface KeywordInputProps {
   keywords: string[];
   onChange: (keywords: string[]) => void;
+  onPendingTextChange?: (pending: string) => void;
   maxKeywords?: number;
   maxLength?: number;
 }
 
-export const KeywordInput = forwardRef<KeywordInputHandle, KeywordInputProps>(function KeywordInput({ keywords, onChange, maxKeywords = 5, maxLength = 100 }, ref) {
+export const KeywordInput = forwardRef<KeywordInputHandle, KeywordInputProps>(function KeywordInput(
+  { keywords, onChange, onPendingTextChange, maxKeywords = 5, maxLength = 100 },
+  ref
+) {
   const [inputValue, setInputValue] = useState('');
+
+  useEffect(() => {
+    onPendingTextChange?.(inputValue);
+  }, [inputValue, onPendingTextChange]);
 
   const addKeyword = (value: string) => {
     const trimmed = value.trim();
-    if (!trimmed || keywords.includes(trimmed) || keywords.length >= maxKeywords) return;
+    if (!trimmed || keywords.includes(trimmed) || keywords.length >= maxKeywords) {
+      setInputValue('');
+      return;
+    }
     if (trimmed.length > maxLength) return;
     onChange([...keywords, trimmed]);
     setInputValue('');
@@ -33,7 +45,9 @@ export const KeywordInput = forwardRef<KeywordInputHandle, KeywordInputProps>(fu
   useImperativeHandle(ref, () => ({
     flush: () => {
       const val = inputValue.trim();
-      if (val) addKeyword(inputValue);
+      if (val && !keywords.includes(val) && keywords.length < maxKeywords) {
+        addKeyword(val);
+      }
       return val;
     },
   }));
@@ -52,7 +66,7 @@ export const KeywordInput = forwardRef<KeywordInputHandle, KeywordInputProps>(fu
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-input bg-background p-2 focus-within:ring-2 focus-within:ring-ring">
         {keywords.map((keyword) => (
-          <Badge key={keyword} variant="secondary" className="gap-1 py-1 pl-3 pr-1.5">
+          <Badge key={keyword} variant="secondary" className="gap-1 py-1 pl-3 pr-1.5 text-sm">
             {keyword}
             <button
               type="button"
@@ -63,17 +77,35 @@ export const KeywordInput = forwardRef<KeywordInputHandle, KeywordInputProps>(fu
             </button>
           </Badge>
         ))}
-        <Input
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={keywords.length === 0 ? 'Enter brand name, product, or keyword...' : 'Add another keyword...'}
-          className="flex-1 border-0 bg-transparent p-0 text-base shadow-none focus-visible:ring-0 min-w-[200px]"
-          maxLength={maxLength}
-        />
+        <div className="flex items-center flex-1 min-w-[220px] gap-2">
+          <Input
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={() => {
+              if (inputValue.trim()) {
+                addKeyword(inputValue);
+              }
+            }}
+            placeholder={keywords.length === 0 ? 'Enter brand name (e.g. GTBank, MTN, Flutterwave)...' : 'Add another keyword...'}
+            className="flex-1 border-0 bg-transparent p-0 text-base shadow-none focus-visible:ring-0"
+            maxLength={maxLength}
+          />
+          {inputValue.trim() && (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="h-7 px-2 text-xs gap-1 shrink-0"
+              onClick={() => addKeyword(inputValue)}
+            >
+              <Plus className="h-3 w-3" /> Add
+            </Button>
+          )}
+        </div>
       </div>
       <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>Press Enter or comma to add • {keywords.length}/{maxKeywords} keywords</span>
+        <span>Press <kbd className="px-1.5 py-0.5 rounded bg-muted font-mono text-[10px]">Enter</kbd> or click <b>Add</b> • {keywords.length}/{maxKeywords} keywords</span>
         {inputValue && <span>{inputValue.length}/{maxLength} characters</span>}
       </div>
     </div>

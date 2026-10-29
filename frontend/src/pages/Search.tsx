@@ -22,11 +22,11 @@ export default function Search() {
   } = useSearchManager();
 
   const [showProgress, setShowProgress] = useState(false);
-  const [lastRequest, setLastRequest] = useState<SearchRequest | null>(null);
+  const [currentRequest, setCurrentRequest] = useState<SearchRequest | null>(null);
   const [view, setView] = useState<'search' | 'results'>('search');
 
   const handleSearch = (request: SearchRequest) => {
-    setLastRequest(request);
+    setCurrentRequest(request);
     setShowProgress(true);
     executeSearch(request);
   };
@@ -37,15 +37,11 @@ export default function Search() {
   };
 
   const handleRerun = (request: SearchRequest) => {
-    // If the template has no keywords, just populate the form
-    if (request.keywords.length === 0) {
-      toast({ title: 'Template loaded', description: 'Enter your keywords and start the analysis.' });
-      return;
-    }
+    setCurrentRequest(request);
     handleSearch(request);
   };
 
-  // When search completes, switch to results
+  // When search completes, switch to results view
   useEffect(() => {
     if (searchState.status === 'complete' && searchState.results) {
       setView('results');
@@ -59,10 +55,10 @@ export default function Search() {
   return (
     <Layout title="Search" subtitle="Analyze brand sentiment across platforms">
       <div className="animate-fade-in">
-        {view === 'results' && searchState.results && lastRequest ? (
+        {view === 'results' && searchState.results && currentRequest ? (
           <SearchResultsSummary
             results={searchState.results}
-            request={lastRequest}
+            request={currentRequest}
             onNewSearch={() => {
               setView('search');
               resetSearch();
@@ -75,6 +71,7 @@ export default function Search() {
                 onSearch={handleSearch}
                 onSave={handleSave}
                 isSearching={searchState.status === 'scraping' || searchState.status === 'analyzing'}
+                initialRequest={currentRequest || undefined}
               />
             </div>
             <div>
@@ -95,7 +92,7 @@ export default function Search() {
         onCancel={() => { cancelSearch(); setShowProgress(false); }}
         status={searchState.status}
         progress={searchState.progress}
-        keywords={lastRequest?.keywords || []}
+        keywords={currentRequest?.keywords || []}
       />
     </Layout>
   );
