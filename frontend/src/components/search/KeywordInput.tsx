@@ -13,12 +13,13 @@ interface KeywordInputProps {
   keywords: string[];
   onChange: (keywords: string[]) => void;
   onPendingTextChange?: (pending: string) => void;
+  onSubmit?: () => void;
   maxKeywords?: number;
   maxLength?: number;
 }
 
 export const KeywordInput = forwardRef<KeywordInputHandle, KeywordInputProps>(function KeywordInput(
-  { keywords, onChange, onPendingTextChange, maxKeywords = 5, maxLength = 100 },
+  { keywords, onChange, onPendingTextChange, onSubmit, maxKeywords = 5, maxLength = 100 },
   ref
 ) {
   const [inputValue, setInputValue] = useState('');
@@ -53,7 +54,21 @@ export const KeywordInput = forwardRef<KeywordInputHandle, KeywordInputProps>(fu
   }));
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' || e.key === ',') {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const val = inputValue.trim();
+      if (val) {
+        addKeyword(val);
+        // Trigger search immediately on Enter!
+        if (onSubmit) {
+          setTimeout(() => onSubmit(), 10);
+        }
+      } else if (keywords.length > 0 && onSubmit) {
+        // If text is empty but keywords exist, trigger search
+        onSubmit();
+      }
+    }
+    if (e.key === ',') {
       e.preventDefault();
       addKeyword(inputValue);
     }
@@ -87,7 +102,7 @@ export const KeywordInput = forwardRef<KeywordInputHandle, KeywordInputProps>(fu
                 addKeyword(inputValue);
               }
             }}
-            placeholder={keywords.length === 0 ? 'Enter brand name (e.g. GTBank, MTN, Flutterwave)...' : 'Add another keyword...'}
+            placeholder={keywords.length === 0 ? 'Enter brand name (e.g. chowdeck, GTBank, MTN)...' : 'Add another keyword...'}
             className="flex-1 border-0 bg-transparent p-0 text-base shadow-none focus-visible:ring-0"
             maxLength={maxLength}
           />
@@ -97,7 +112,9 @@ export const KeywordInput = forwardRef<KeywordInputHandle, KeywordInputProps>(fu
               size="sm"
               variant="secondary"
               className="h-7 px-2 text-xs gap-1 shrink-0"
-              onClick={() => addKeyword(inputValue)}
+              onClick={() => {
+                addKeyword(inputValue);
+              }}
             >
               <Plus className="h-3 w-3" /> Add
             </Button>
@@ -105,7 +122,7 @@ export const KeywordInput = forwardRef<KeywordInputHandle, KeywordInputProps>(fu
         </div>
       </div>
       <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>Press <kbd className="px-1.5 py-0.5 rounded bg-muted font-mono text-[10px]">Enter</kbd> or click <b>Add</b> • {keywords.length}/{maxKeywords} keywords</span>
+        <span>Press <kbd className="px-1.5 py-0.5 rounded bg-muted font-mono text-[10px]">Enter</kbd> to search immediately • {keywords.length}/{maxKeywords} keywords</span>
         {inputValue && <span>{inputValue.length}/{maxLength} characters</span>}
       </div>
     </div>

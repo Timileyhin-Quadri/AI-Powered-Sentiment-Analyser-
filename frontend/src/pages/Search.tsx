@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Layout } from '@/components/layout/Layout';
 import { SearchCommandCenter } from '@/components/search/SearchCommandCenter';
 import { SearchProgressModal } from '@/components/search/SearchProgressModal';
@@ -10,6 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 
 export default function Search() {
   const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
   const {
     searchState,
     searchHistory,
@@ -24,6 +26,7 @@ export default function Search() {
   const [showProgress, setShowProgress] = useState(false);
   const [currentRequest, setCurrentRequest] = useState<SearchRequest | null>(null);
   const [view, setView] = useState<'search' | 'results'>('search');
+  const handledQueryRef = useRef<string | null>(null);
 
   const handleSearch = (request: SearchRequest) => {
     setCurrentRequest(request);
@@ -40,6 +43,49 @@ export default function Search() {
     setCurrentRequest(request);
     handleSearch(request);
   };
+
+  // 1. Trigger search from URL query parameter (e.g. /search?q=chowdeck)
+  const urlQuery = searchParams.get('q');
+  useEffect(() => {
+    if (urlQuery && urlQuery.trim() && urlQuery.trim() !== handledQueryRef.current) {
+      const q = urlQuery.trim();
+      handledQueryRef.current = q;
+      setSearchParams({}, { replace: true });
+
+      const req: SearchRequest = {
+        keywords: [q],
+        maxPosts: 30,
+        platforms: ['twitter', 'instagram', 'facebook', 'linkedin'],
+        includeComments: true,
+        includeRetweets: true,
+        language: 'en',
+      };
+      handleSearch(req);
+    }
+  }, [urlQuery, setSearchParams]);
+
+  // 2. Trigger search from top Header custom event (instant in-page trigger)
+  useEffect(() => {
+    const handleGlobalSearch = (e: Event) => {
+      const custom = e as CustomEvent<string>;
+      const q = custom.detail?.trim();
+      if (q && q !== handledQueryRef.current) {
+        handledQueryRef.current = q;
+        const req: SearchRequest = {
+          keywords: [q],
+          maxPosts: 30,
+          platforms: ['twitter', 'instagram', 'facebook', 'linkedin'],
+          includeComments: true,
+          includeRetweets: true,
+          language: 'en',
+        };
+        handleSearch(req);
+      }
+    };
+
+    window.addEventListener('sentitrack_header_search', handleGlobalSearch);
+    return () => window.removeEventListener('sentitrack_header_search', handleGlobalSearch);
+  }, []);
 
   // When search completes, switch to results view
   useEffect(() => {
@@ -62,6 +108,7 @@ export default function Search() {
             onNewSearch={() => {
               setView('search');
               resetSearch();
+              handledQueryRef.current = null;
             }}
           />
         ) : (

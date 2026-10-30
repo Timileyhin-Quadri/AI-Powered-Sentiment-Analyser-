@@ -38,7 +38,7 @@ export function SearchCommandCenter({ onSearch, onSave, isSearching, initialRequ
   const [includeRetweets, setIncludeRetweets] = useState(true);
   const [language, setLanguage] = useState('en');
 
-  // Sync with initialRequest when templates or rerun are triggered
+  // Sync with initialRequest when templates or rerun or header searches are triggered
   useEffect(() => {
     if (initialRequest?.keywords && initialRequest.keywords.length > 0) {
       setKeywords(initialRequest.keywords);
@@ -110,7 +110,7 @@ export function SearchCommandCenter({ onSearch, onSave, isSearching, initialRequ
         </div>
       </div>
 
-      {/* Keyword Input */}
+      {/* Keyword Input with Instant Enter Search */}
       <div className="space-y-2">
         <Label className="text-sm font-medium">Keywords</Label>
         <KeywordInput
@@ -118,6 +118,7 @@ export function SearchCommandCenter({ onSearch, onSave, isSearching, initialRequ
           keywords={keywords}
           onChange={setKeywords}
           onPendingTextChange={setPendingText}
+          onSubmit={handleSearch}
         />
       </div>
 
@@ -126,6 +127,7 @@ export function SearchCommandCenter({ onSearch, onSave, isSearching, initialRequ
         <div className="flex items-center justify-between">
           <Label className="text-sm font-medium">Platforms</Label>
           <button
+            type="button"
             onClick={selectAll}
             className="text-xs font-medium text-primary hover:underline"
           >
@@ -139,9 +141,10 @@ export function SearchCommandCenter({ onSearch, onSave, isSearching, initialRequ
             return (
               <button
                 key={p.value}
+                type="button"
                 onClick={() => togglePlatform(p.value)}
                 className={cn(
-                  'flex items-center gap-2.5 rounded-lg border p-3 text-sm font-medium transition-all',
+                  'flex items-center gap-2.5 rounded-lg border p-3 text-sm font-medium transition-all text-left',
                   isSelected
                     ? 'border-primary/50 bg-primary/5 text-foreground shadow-sm'
                     : 'border-border bg-secondary/30 text-muted-foreground hover:bg-secondary/60'
@@ -184,6 +187,7 @@ export function SearchCommandCenter({ onSearch, onSave, isSearching, initialRequ
       {/* Advanced Options */}
       <div>
         <button
+          type="button"
           onClick={() => setShowAdvanced(!showAdvanced)}
           className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
         >
@@ -224,6 +228,7 @@ export function SearchCommandCenter({ onSearch, onSave, isSearching, initialRequ
       {/* Action Buttons */}
       <div className="flex flex-col sm:flex-row gap-3">
         <Button
+          type="button"
           className="flex-1 gap-2"
           size="lg"
           onClick={handleSearch}
@@ -233,6 +238,7 @@ export function SearchCommandCenter({ onSearch, onSave, isSearching, initialRequ
           {isSearching ? 'Analyzing...' : 'Start Analysis'}
         </Button>
         <Button
+          type="button"
           variant="outline"
           size="lg"
           onClick={() => {
