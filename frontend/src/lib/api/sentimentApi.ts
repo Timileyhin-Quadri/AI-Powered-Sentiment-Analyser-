@@ -100,7 +100,7 @@ export interface LiveCompetitorResponse {
 async function fetchWithTimeout(
   url: string,
   options: RequestInit = {},
-  timeoutMs = 60000
+  timeoutMs = 150000
 ): Promise<Response> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -302,7 +302,7 @@ export const analyzeSentiment = async (
         }),
         signal,
       },
-      60000
+      150000
     );
 
     if (!response.ok) {
@@ -379,7 +379,7 @@ export const analyzeAll = async (
         }),
         signal,
       },
-      75000
+      150000
     );
 
     if (!response.ok) {
@@ -455,7 +455,7 @@ export const analyzeCompetitors = async (
         body: JSON.stringify({ keyword: brandName, brand_name: brandName, platforms }),
         signal,
       },
-      75000
+      150000
     );
 
     if (!response.ok) {
@@ -492,7 +492,7 @@ export const analyzeComplaints = async (
         body: JSON.stringify({ keyword, limit: 30, platforms }),
         signal,
       },
-      60000
+      150000
     );
 
     if (!response.ok) {

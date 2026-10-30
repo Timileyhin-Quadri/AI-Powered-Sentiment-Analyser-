@@ -69,3 +69,5 @@ SentimentApp/.next/
 cookies.json
 session_state.json
 *.session.json
+
+.x_session/

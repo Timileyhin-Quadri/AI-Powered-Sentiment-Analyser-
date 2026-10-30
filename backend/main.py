@@ -15,7 +15,7 @@ import uvicorn
 _scraper_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="scraper")
 
 # Maximum seconds to wait for scraping+analysis before returning fallback
-SCRAPE_TIMEOUT_SECONDS = 45
+SCRAPE_TIMEOUT_SECONDS = 120
 
 try:
     from backend.scraper import scrape_topic, generate_scraped_tweets_for_topic  # type: ignore

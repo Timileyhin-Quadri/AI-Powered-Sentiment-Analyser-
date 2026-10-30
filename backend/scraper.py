@@ -1,9 +1,14 @@
-# backend/scraper.py - Playwright CDP Twitter Scraper & Fallback Pipeline
+# backend/scraper.py - High-Performance Playwright Chrome CDP Twitter Scraper & Fallback Pipeline
 import os
 import sys
 import time
+import json
+import glob
+import shutil
 import random
+import subprocess
 import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 import pandas as pd
@@ -21,7 +26,10 @@ except Exception:
 # Load environment variables
 load_dotenv()
 
-DEFAULT_CDP_URL = os.environ.get("CHROME_CDP_URL", "http://localhost:9222")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_CDP_PORT = int(os.environ.get("CHROME_CDP_PORT", "9222"))
+DEFAULT_CDP_URL = os.environ.get("CHROME_CDP_URL", f"http://127.0.0.1:{DEFAULT_CDP_PORT}")
+USER_DATA_DIR = os.path.join(PROJECT_ROOT, ".x_session")
 
 # Import Session Manager helpers
 try:
@@ -42,14 +50,112 @@ except ImportError:
     )
 
 
-def is_cdp_available(host: str = "127.0.0.1", port: int = 9222) -> bool:
-    """Fast non-blocking socket check (0.5s) to verify Chrome debugging port is active."""
-    import socket
+def find_chrome_executable(custom_path: Optional[str] = None) -> str:
+    """Find Google Chrome or Chromium executable on the system across platforms."""
+    if custom_path and os.path.isfile(custom_path):
+        return custom_path
+
+    env_path = os.getenv("CHROME_PATH")
+    if env_path and os.path.isfile(env_path):
+        return env_path
+
+    candidates = []
+    if sys.platform == "win32":
+        candidates.extend([
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
+            r"C:\Program Files\Chromium\Application\chrome.exe",
+            os.path.expanduser(r"~\AppData\Local\Chromium\Application\chrome.exe"),
+        ])
+        playwright_dir = os.path.expanduser(r"~\AppData\Local\ms-playwright")
+        if os.path.isdir(playwright_dir):
+            for pattern in ["chromium-*/chrome-win64/chrome.exe", "chromium-*/chrome-win/chrome.exe"]:
+                candidates.extend(glob.glob(os.path.join(playwright_dir, pattern)))
+    elif sys.platform == "darwin":
+        candidates.extend([
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            os.path.expanduser("~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+        ])
+    else:
+        candidates.extend([
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/snap/bin/chromium",
+        ])
+
+    for name in ["chrome", "google-chrome", "google-chrome-stable", "chromium"]:
+        which_path = shutil.which(name)
+        if which_path:
+            candidates.append(which_path)
+
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return path
+
+    raise FileNotFoundError(
+        "Could not find Google Chrome or Chromium executable. "
+        "Please install Google Chrome or set the CHROME_PATH environment variable."
+    )
+
+
+def is_cdp_ready(host: str = "127.0.0.1", port: int = DEFAULT_CDP_PORT) -> bool:
+    """Checks if the Chrome CDP debugging endpoint is listening and ready."""
     try:
-        with socket.create_connection((host, port), timeout=0.5):
-            return True
-    except (OSError, ConnectionRefusedError):
+        url = f"http://{host}:{port}/json/version"
+        with urllib.request.urlopen(url, timeout=1) as resp:
+            return resp.status == 200
+    except Exception:
         return False
+
+
+def ensure_chrome_running(port: int = DEFAULT_CDP_PORT, headless: bool = True) -> Optional[subprocess.Popen]:
+    """
+    Checks if Chrome is listening on the remote debugging port.
+    If not, automatically launches Google Chrome with persistent session state and anti-detection flags.
+    """
+    if is_cdp_ready("127.0.0.1", port):
+        print(f"[CDP] Attached to existing Chrome debugging session on port {port}.")
+        return None
+
+    os.makedirs(USER_DATA_DIR, exist_ok=True)
+
+    # Clean up stale Singleton lock files from interrupted sessions
+    for lock in glob.glob(os.path.join(USER_DATA_DIR, "Singleton*")):
+        try:
+            os.remove(lock)
+        except OSError:
+            pass
+
+    executable = find_chrome_executable()
+    launch_cmd = [
+        executable,
+        f"--remote-debugging-port={port}",
+        f"--user-data-dir={USER_DATA_DIR}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-infobars",
+    ]
+    if headless:
+        launch_cmd.append("--headless=new")
+
+    print(f"[SCRAPER] Auto-launching Google Chrome on port {port} (headless={headless})...")
+    proc = subprocess.Popen(launch_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # Wait up to 15 seconds for CDP endpoint to respond
+    for _ in range(30):
+        if is_cdp_ready("127.0.0.1", port):
+            print(f"[CDP READY] Chrome is actively listening on port {port} (PID: {proc.pid}).")
+            return proc
+        time.sleep(0.5)
+
+    print(f"[WARN] Chrome did not respond on port {port} within 15 seconds.")
+    return proc
 
 
 def generate_scraped_tweets_for_topic(topic: str, count: int = 25) -> List[Dict[str, Any]]:
@@ -116,62 +222,85 @@ def generate_scraped_tweets_for_topic(topic: str, count: int = 25) -> List[Dict[
     return results
 
 
-def scrape_with_playwright_cdp(topic: str, max_tweets: int = 30, cdp_url: str = DEFAULT_CDP_URL) -> List[Dict[str, Any]]:
+def scrape_with_playwright_cdp(topic: str, max_tweets: int = 50, cdp_port: int = DEFAULT_CDP_PORT) -> List[Dict[str, Any]]:
     """
-    Scrapes Twitter/X by attaching to a running Google Chrome instance via CDP (port 9222).
-    Evades bot detection because it runs inside your real, authenticated Chrome process.
-    Captures tweets both via Twitter's internal GraphQL JSON API and the rendered DOM.
+    High-performance scraping pipeline adapted from X-Scrapper:
+    1. Ensures Google Chrome is actively running on CDP port 9222 (auto-launches if needed).
+    2. Attaches Playwright over CDP to the authentic Chrome browser process.
+    3. Loads session cookies and injects stealth evasion scripts.
+    4. Navigates to search with wait_until='commit' (eliminating telemetry timeouts).
+    5. Intercepts GraphQL SearchTimeline responses in parallel with DOM extraction.
+    6. Dismisses cookie consent dialogues and handles scroll loops with duplicate elimination.
     """
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        print("[SCRAPER WARNING] Playwright is not installed. Ensure you run in the uv environment.")
+        print("[SCRAPER ERROR] Playwright is not installed.")
         return []
 
     tweets_data: List[Dict[str, Any]] = []
     seen_texts = set()
 
-    # Fast non-blocking check: verify port 9222 is open before launching Playwright
+    # Step 1: Ensure Chrome is running on CDP port
+    chrome_proc = None
     try:
-        parsed = urllib.parse.urlparse(cdp_url)
-        host = parsed.hostname or "127.0.0.1"
-        port = parsed.port or 9222
-        if not is_cdp_available(host, port):
-            print(f"[SCRAPER NOTICE] Chrome debugging port {port} is not running.")
-            print(f"[INFO] To attach live Chrome session, launch: chrome.exe --remote-debugging-port={port}")
-            return []
-    except Exception:
-        pass
+        chrome_proc = ensure_chrome_running(port=cdp_port, headless=True)
+    except Exception as e:
+        print(f"[SCRAPER NOTICE] Could not launch/attach Chrome via CDP: {e}")
+        return []
 
-    print(f"[CDP] Connecting to Chrome via CDP at {cdp_url} for '{topic}'...")
+    cdp_url = f"http://127.0.0.1:{cdp_port}"
+    print(f"[CDP] Connecting Playwright to Chrome at {cdp_url} for '{topic}'...")
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.connect_over_cdp(cdp_url, timeout=5000)
+            browser = p.chromium.connect_over_cdp(cdp_url, timeout=10000)
             context = browser.contexts[0] if browser.contexts else browser.new_context()
-            # Auto-cache session cookies if not yet saved and auth_token is present
-            try:
-                session_status = check_saved_session()
-                if not session_status.get("has_auth_token"):
-                    save_session_from_context(context, verbose=False)
-            except Exception:
-                pass
+
+            # Load saved session cookies into context if available
+            session_status = check_saved_session()
+            if session_status.get("has_auth_token"):
+                load_session_into_context(context, verbose=False)
+            elif os.path.exists(COOKIES_FILE_PATH):
+                try:
+                    with open(COOKIES_FILE_PATH, "r", encoding="utf-8") as f:
+                        cookies = json.load(f)
+                    context.add_cookies(cookies)
+                except Exception:
+                    pass
 
             page = context.new_page()
 
-            # Listener for Twitter GraphQL SearchTimeline network responses
+            # Stealth evasion script to strip navigator.webdriver
+            page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                window.chrome = { runtime: {} };
+            """)
+
+            # Network listener for Twitter GraphQL SearchTimeline API responses
             def handle_response(response):
                 if "/SearchTimeline" in response.url and response.status == 200:
                     try:
                         data = response.json()
-                        instructions = data.get("data", {}).get("search_by_raw_query", {}).get("search_timeline", {}).get("timeline", {}).get("instructions", [])
+                        instructions = (
+                            data.get("data", {})
+                            .get("search_by_raw_query", {})
+                            .get("search_timeline", {})
+                            .get("timeline", {})
+                            .get("instructions", [])
+                        )
                         for inst in instructions:
                             if inst.get("type") == "TimelineAddEntries":
                                 for entry in inst.get("entries", []):
-                                    tweet_res = entry.get("content", {}).get("itemContent", {}).get("tweet_results", {}).get("result", {})
+                                    tweet_res = (
+                                        entry.get("content", {})
+                                        .get("itemContent", {})
+                                        .get("tweet_results", {})
+                                        .get("result", {})
+                                    )
                                     legacy = tweet_res.get("legacy", {})
                                     text = legacy.get("full_text", "")
-                                    if text and text not in seen_texts and len(text) > 10:
+                                    if text and text not in seen_texts and len(text) > 8:
                                         seen_texts.add(text)
                                         tweets_data.append({
                                             "text": text,
@@ -185,27 +314,64 @@ def scrape_with_playwright_cdp(topic: str, max_tweets: int = 30, cdp_url: str = 
 
             page.on("response", handle_response)
 
-            query = urllib.parse.quote(f"{topic} lang:en")
-            url = f"https://x.com/search?q={query}&f=live"
-            print(f"[CDP] Navigating to: {url}")
+            # Navigate to Search (Live / latest tab)
+            encoded_query = urllib.parse.quote(f"{topic} lang:en")
+            search_url = f"https://x.com/search?q={encoded_query}&f=live"
+            print(f"[CDP] Navigating to: {search_url}")
 
-            page.goto(url, wait_until="domcontentloaded", timeout=25000)
-            page.wait_for_timeout(3000)
+            # Using wait_until="commit" ensures instant page entry without waiting on infinite streaming telemetry
+            try:
+                page.goto(search_url, wait_until="commit", timeout=25000)
+            except Exception as nav_err:
+                print(f"[SCRAPER] Initial navigation notice: {nav_err}")
+
+            time.sleep(3)
+
+            # Check if redirected to login flow (expired cookies)
+            if "flow/login" in page.url.lower():
+                print("[CDP NOTICE] Saved session appears expired or redirected to login.")
+                page.close()
+                return []
+
+            # Dismiss cookie consent dialogs if present
+            for dismiss_sel in [
+                'button:has-text("Refuse non-essential cookies")',
+                'button:has-text("Accept all cookies")',
+                '[aria-label="Close"]',
+                'button:has-text("Dismiss")',
+            ]:
+                try:
+                    btn = page.query_selector(dismiss_sel)
+                    if btn and btn.is_visible():
+                        btn.click()
+                        time.sleep(1)
+                except Exception:
+                    pass
 
             # Scroll loop
-            scroll_attempts = 0
-            while len(tweets_data) < max_tweets and scroll_attempts < 8:
-                # Also collect tweets directly from DOM as fallback
+            scroll_count = 0
+            max_scrolls = 25
+            no_new_scrolls = 0
+
+            while len(tweets_data) < max_tweets and scroll_count < max_scrolls:
+                prev_count = len(tweets_data)
+
+                # Extract tweets directly from rendered DOM
                 articles = page.locator("article[data-testid='tweet']").all()
                 for article in articles:
                     try:
                         text_elem = article.locator("div[data-testid='tweetText']").first
                         text = text_elem.inner_text().strip()
-                        if text and text not in seen_texts and len(text) > 10:
+                        if text and text not in seen_texts and len(text) > 8:
                             seen_texts.add(text)
+
+                            # Parse timestamp
+                            time_elem = article.locator("time").first
+                            timestamp = time_elem.get_attribute("datetime") if time_elem.count() > 0 else datetime.now().isoformat()
+
                             tweets_data.append({
                                 "text": text,
-                                "timestamp": datetime.now().isoformat(),
+                                "timestamp": timestamp or datetime.now().isoformat(),
                                 "keyword": topic
                             })
                             if len(tweets_data) >= max_tweets:
@@ -213,25 +379,63 @@ def scrape_with_playwright_cdp(topic: str, max_tweets: int = 30, cdp_url: str = 
                     except Exception:
                         continue
 
-                page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
-                page.wait_for_timeout(random.uniform(1500, 2500))
-                scroll_attempts += 1
+                # Auto-cache updated cookies if auth_token is present
+                if len(tweets_data) > 0 and not session_status.get("has_auth_token"):
+                    try:
+                        save_session_from_context(context, verbose=False)
+                    except Exception:
+                        pass
 
-            # Close ONLY the tab we created, preserving the user's browser session!
+                if len(tweets_data) > prev_count:
+                    no_new_scrolls = 0
+                else:
+                    no_new_scrolls += 1
+                    if no_new_scrolls >= 6:
+                        break
+
+                # Scroll down using innerHeight multiplier as in X-Scrapper
+                page.evaluate("window.scrollBy(0, window.innerHeight * 1.5)")
+                time.sleep(random.uniform(1.8, 2.8))
+                scroll_count += 1
+
+            # Fallback to Top tab if Live tab returned 0 tweets
+            if len(tweets_data) == 0:
+                print(f"[CDP] Checking Top tab fallback for '{topic}'...")
+                top_url = f"https://x.com/search?q={encoded_query}&src=typed_query"
+                try:
+                    page.goto(top_url, wait_until="commit", timeout=20000)
+                    time.sleep(3)
+                    articles = page.locator("article[data-testid='tweet']").all()
+                    for article in articles:
+                        try:
+                            text_elem = article.locator("div[data-testid='tweetText']").first
+                            text = text_elem.inner_text().strip()
+                            if text and text not in seen_texts and len(text) > 8:
+                                seen_texts.add(text)
+                                tweets_data.append({
+                                    "text": text,
+                                    "timestamp": datetime.now().isoformat(),
+                                    "keyword": topic
+                                })
+                                if len(tweets_data) >= max_tweets:
+                                    break
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+
             page.close()
-            print(f"[CDP SUCCESS] Extracted {len(tweets_data)} live tweets cleanly via CDP.")
+            print(f"[CDP SUCCESS] Extracted {len(tweets_data)} live tweets cleanly via Chrome CDP.")
 
     except Exception as e:
-        print(f"[SCRAPER NOTICE] Playwright CDP connection failed ({e}).")
-        print(f"[INFO] To attach live Chrome, launch Chrome with: chrome.exe --remote-debugging-port=9222")
+        print(f"[CDP NOTICE] Scraping encounter: {e}")
 
     return tweets_data
 
 
-def scrape_with_saved_cookies(topic: str, max_tweets: int = 30) -> List[Dict[str, Any]]:
+def scrape_with_saved_cookies(topic: str, max_tweets: int = 50) -> List[Dict[str, Any]]:
     """
-    Scrapes Twitter/X using saved session cookies from cookies.json or session_state.json.
-    Runs headless using real Chrome or Playwright Chromium without needing port 9222 active.
+    Secondary fallback: launches standalone Chromium with stored cookies.json or session_state.json.
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -248,7 +452,6 @@ def scrape_with_saved_cookies(topic: str, max_tweets: int = 30) -> List[Dict[str
 
     try:
         with sync_playwright() as p:
-            # Prefer Chrome channel for anti-detection, fallback to Chromium
             browser = None
             try:
                 browser = p.chromium.launch(
@@ -262,7 +465,6 @@ def scrape_with_saved_cookies(topic: str, max_tweets: int = 30) -> List[Dict[str
                     args=["--disable-blink-features=AutomationControlled"]
                 )
 
-            # Create context and load saved session
             if os.path.exists(STORAGE_STATE_PATH):
                 try:
                     context = browser.new_context(
@@ -282,18 +484,34 @@ def scrape_with_saved_cookies(topic: str, max_tweets: int = 30) -> List[Dict[str
 
             page = context.new_page()
 
+            page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                window.chrome = { runtime: {} };
+            """)
+
             def handle_response(response):
                 if "/SearchTimeline" in response.url and response.status == 200:
                     try:
                         data = response.json()
-                        instructions = data.get("data", {}).get("search_by_raw_query", {}).get("search_timeline", {}).get("timeline", {}).get("instructions", [])
+                        instructions = (
+                            data.get("data", {})
+                            .get("search_by_raw_query", {})
+                            .get("search_timeline", {})
+                            .get("timeline", {})
+                            .get("instructions", [])
+                        )
                         for inst in instructions:
                             if inst.get("type") == "TimelineAddEntries":
                                 for entry in inst.get("entries", []):
-                                    tweet_res = entry.get("content", {}).get("itemContent", {}).get("tweet_results", {}).get("result", {})
+                                    tweet_res = (
+                                        entry.get("content", {})
+                                        .get("itemContent", {})
+                                        .get("tweet_results", {})
+                                        .get("result", {})
+                                    )
                                     legacy = tweet_res.get("legacy", {})
                                     text = legacy.get("full_text", "")
-                                    if text and text not in seen_texts and len(text) > 10:
+                                    if text and text not in seen_texts and len(text) > 8:
                                         seen_texts.add(text)
                                         tweets_data.append({
                                             "text": text,
@@ -309,26 +527,21 @@ def scrape_with_saved_cookies(topic: str, max_tweets: int = 30) -> List[Dict[str
 
             query = urllib.parse.quote(f"{topic} lang:en")
             url = f"https://x.com/search?q={query}&f=live"
-            print(f"[SAVED COOKIES] Navigating to: {url}")
+            page.goto(url, wait_until="commit", timeout=25000)
+            time.sleep(3)
 
-            page.goto(url, wait_until="domcontentloaded", timeout=25000)
-            page.wait_for_timeout(3000)
-
-            # Check if redirected to login flow (expired cookies)
             if "flow/login" in page.url.lower():
-                print("[SAVED COOKIES NOTICE] Saved cookies appear expired or invalid. Please run 'python export_cookies.py' to refresh.")
                 browser.close()
                 return []
 
-            # Scroll loop
             scroll_attempts = 0
-            while len(tweets_data) < max_tweets and scroll_attempts < 8:
+            while len(tweets_data) < max_tweets and scroll_attempts < 15:
                 articles = page.locator("article[data-testid='tweet']").all()
                 for article in articles:
                     try:
                         text_elem = article.locator("div[data-testid='tweetText']").first
                         text = text_elem.inner_text().strip()
-                        if text and text not in seen_texts and len(text) > 10:
+                        if text and text not in seen_texts and len(text) > 8:
                             seen_texts.add(text)
                             tweets_data.append({
                                 "text": text,
@@ -340,38 +553,35 @@ def scrape_with_saved_cookies(topic: str, max_tweets: int = 30) -> List[Dict[str
                     except Exception:
                         continue
 
-                page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
-                page.wait_for_timeout(random.uniform(1500, 2500))
+                page.evaluate("window.scrollBy(0, window.innerHeight * 1.5)")
+                time.sleep(random.uniform(1.8, 2.5))
                 scroll_attempts += 1
 
             browser.close()
             print(f"[SAVED COOKIES SUCCESS] Extracted {len(tweets_data)} live tweets using saved session.")
 
     except Exception as e:
-        print(f"[SAVED COOKIES NOTICE] Scraping with saved cookies encountered: {e}")
+        print(f"[SAVED COOKIES NOTICE] Encountered: {e}")
 
     return tweets_data
 
 
-def scrape_topic(topic: str, max_tweets: int = 30) -> pd.DataFrame:
+def scrape_topic(topic: str, max_tweets: int = 50) -> pd.DataFrame:
     """
     Main scraping interface with multi-tier resilience:
-    1. Attempts Playwright CDP attachment on port 9222 first (real active browser).
-    2. If CDP not running, attempts Playwright with saved session cookies (cookies.json).
-    3. If neither is available or returns 0 posts, supplements with realistic social feed.
+    1. Live Chrome CDP with automated Chrome launch and cookie restoration.
+    2. Headless Chromium using saved cookies if CDP fails.
+    3. Realistic social media fallback feed if scraping returns 0 posts or encounters anti-bot blocks.
     """
     print(f"[SCRAPER] Starting scrape workflow for: {topic}")
     tweets_data = []
 
-    # Priority 1: Live Chrome CDP on port 9222
+    # Priority 1: Chrome CDP with auto-start and session cookies
     tweets_data = scrape_with_playwright_cdp(topic, max_tweets)
 
     # Priority 2: Standalone Playwright using saved session cookies
     if not tweets_data:
-        session_status = check_saved_session()
-        if session_status.get("has_auth_token"):
-            print(f"[SCRAPER] Using saved session cookies ({session_status.get('cookie_count')} cookies)...")
-            tweets_data = scrape_with_saved_cookies(topic, max_tweets)
+        tweets_data = scrape_with_saved_cookies(topic, max_tweets)
 
     # Priority 3: Fallback social data feed
     if not tweets_data:
@@ -383,7 +593,7 @@ def scrape_topic(topic: str, max_tweets: int = 30) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    df = scrape_topic("GTBank", max_tweets=5)
+    df = scrape_topic("chowdeck", max_tweets=5)
     print(f"Result count: {len(df)}")
     for _, r in df.iterrows():
         print(f"- {r['text'][:80]}...")
