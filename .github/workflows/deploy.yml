@@ -1,0 +1,115 @@
+name: SentiTrack CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  # ============================================================
+  # Stage 1: Build & Verify (CI)
+  # ============================================================
+  build-and-test:
+    name: Build & Verify (CI)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify Backend Imports
+        run: |
+          python -c "from backend.main import app; print('Backend loaded successfully. Routes:', len(app.routes))"
+          python -c "from backend.scraper import scrape_topic; print('Scraper module valid')"
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies & Build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+  # ============================================================
+  # Stage 2: Deploy to Azure Linux VM (CD)
+  # ============================================================
+  deploy:
+    name: Deploy to Azure VM (CD)
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH to Azure VM
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.AZURE_VM_IP }}
+          username: ${{ secrets.AZURE_VM_USER }}
+          key: ${{ secrets.AZURE_SSH_PRIVATE_KEY }}
+          port: 22
+          timeout: 180s
+          script: |
+            set -e
+            echo "==> Starting SentiTrack deployment on Azure VM..."
+
+            APP_DIR="/opt/sentitrack"
+
+            # 1. Clone repository if first time, otherwise pull latest changes
+            if [ ! -d "$APP_DIR/.git" ]; then
+              echo "==> Cloning repository to $APP_DIR..."
+              sudo mkdir -p $APP_DIR
+              sudo chown -R $USER:$USER $APP_DIR
+              git clone https://github.com/${{ github.repository }}.git $APP_DIR
+              cd $APP_DIR
+            else
+              echo "==> Pulling latest changes from main..."
+              cd $APP_DIR
+              git fetch origin main
+              git reset --hard origin/main
+            fi
+
+            # 2. Ensure session and environment files exist
+            touch cookies.json session_state.json
+
+            # 3. Inject production .env if provided in GitHub Secrets
+            if [ -n "${{ secrets.PROD_ENV }}" ]; then
+              echo "${{ secrets.PROD_ENV }}" > .env
+              echo "==> Injected production .env configuration."
+            fi
+
+            # 4. Build and start containers with Docker Compose
+            echo "==> Rebuilding and restarting containers..."
+            docker compose down --remove-orphans || true
+            docker compose up -d --build
+
+            # 5. Clean up stale/dangling Docker images to save disk space
+            docker image prune -f
+
+            # 6. Verify health check
+            echo "==> Verifying deployment health..."
+            sleep 8
+            curl -f http://localhost/api/health || {
+              echo "Health check failed! Checking logs:"
+              docker compose logs --tail=50
+              exit 1
+            }
+
+            echo "==> Deployment completed successfully!"
