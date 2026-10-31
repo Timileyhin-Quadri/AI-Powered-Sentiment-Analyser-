@@ -152,3 +152,4 @@ Run these commands inside `/opt/sentitrack` on your VM:
   curl http://localhost/api/health
   # Returns: {"status":"healthy","model_loaded":true}
   ```
+
