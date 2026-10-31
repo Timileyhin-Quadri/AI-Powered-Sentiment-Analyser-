@@ -52,14 +52,29 @@ function saveToStorage(key: string, data: unknown) {
 export function useSearchManager() {
   const { user } = useAuth();
 
-  const [searchState, setSearchState] = useState<SearchState>({
-    status: 'idle',
-    progress: {
-      platformsCompleted: 0,
-      totalPlatforms: 0,
-      postsCollected: 0,
-      platformStatuses: {},
-    },
+  const [searchState, setSearchState] = useState<SearchState>(() => {
+    const cached = loadFromStorage<SearchResults | undefined>(LAST_RESULTS_KEY, undefined);
+    if (cached && cached.summary && cached.posts && cached.posts.length > 0) {
+      return {
+        status: 'complete',
+        progress: {
+          platformsCompleted: 1,
+          totalPlatforms: 1,
+          postsCollected: cached.summary.total_posts,
+          platformStatuses: { twitter: 'complete' },
+        },
+        results: cached,
+      };
+    }
+    return {
+      status: 'idle',
+      progress: {
+        platformsCompleted: 0,
+        totalPlatforms: 0,
+        postsCollected: 0,
+        platformStatuses: {},
+      },
+    };
   });
 
   const [searchHistory, setSearchHistory] = useState<SavedSearch[]>(() =>

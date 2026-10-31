@@ -87,24 +87,31 @@ export default function Search() {
     return () => window.removeEventListener('sentitrack_header_search', handleGlobalSearch);
   }, []);
 
-  // When search completes, switch to results view
+  // When search completes, immediately switch to results view and close progress modal
   useEffect(() => {
     if (searchState.status === 'complete' && searchState.results) {
       setView('results');
+      setShowProgress(false);
     }
     if (searchState.status === 'error') {
       setShowProgress(false);
       toast({ title: 'Search failed', description: searchState.error, variant: 'destructive' });
     }
-  }, [searchState.status]);
+  }, [searchState.status, searchState.results]);
+
+  const effectiveRequest: SearchRequest = currentRequest || {
+    keywords: [handledQueryRef.current || 'Brand Analysis'],
+    maxPosts: searchState.results?.summary?.total_posts || 30,
+    platforms: ['twitter', 'instagram', 'facebook', 'linkedin'],
+  };
 
   return (
     <Layout title="Search" subtitle="Analyze brand sentiment across platforms">
       <div className="animate-fade-in">
-        {view === 'results' && searchState.results && currentRequest ? (
+        {view === 'results' && searchState.results ? (
           <SearchResultsSummary
             results={searchState.results}
-            request={currentRequest}
+            request={effectiveRequest}
             onNewSearch={() => {
               setView('search');
               resetSearch();
@@ -139,7 +146,7 @@ export default function Search() {
         onCancel={() => { cancelSearch(); setShowProgress(false); }}
         status={searchState.status}
         progress={searchState.progress}
-        keywords={currentRequest?.keywords || []}
+        keywords={effectiveRequest.keywords}
       />
     </Layout>
   );
