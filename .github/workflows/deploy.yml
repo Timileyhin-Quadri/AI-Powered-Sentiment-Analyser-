@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   # ============================================================
   # Stage 1: Build & Verify (CI)
@@ -72,22 +75,22 @@ jobs:
 
             APP_DIR="/opt/sentitrack"
 
-            # 1. Clone/initialize repository if first time, otherwise pull latest changes
-            if [ ! -d "$APP_DIR/.git" ]; then
+            # 1. Sync repository code
+            sudo mkdir -p $APP_DIR
+            sudo chown -R $USER:$USER $APP_DIR
+            cd $APP_DIR
+
+            if [ ! -d ".git" ]; then
               echo "==> Initializing repository in $APP_DIR..."
-              sudo mkdir -p $APP_DIR
-              sudo chown -R $USER:$USER $APP_DIR
-              cd $APP_DIR
               git init
-              git remote add origin https://github.com/${{ github.repository }}.git || git remote set-url origin https://github.com/${{ github.repository }}.git
-              git fetch origin main
-              git checkout -f -B main origin/main
-            else
-              echo "==> Pulling latest changes from main..."
-              cd $APP_DIR
-              git fetch origin main
-              git reset --hard origin/main
             fi
+
+            echo "==> Syncing latest changes from main..."
+            git remote remove origin 2>/dev/null || true
+            git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+            git fetch origin main
+            git checkout -f -B main origin/main
+            git remote set-url origin "https://github.com/${{ github.repository }}.git"
 
             # 2. Ensure session and environment files exist
             touch cookies.json session_state.json
@@ -100,11 +103,20 @@ jobs:
 
             # 4. Build and start containers with Docker Compose
             echo "==> Rebuilding and restarting containers..."
-            docker compose down --remove-orphans || true
-            docker compose up -d --build
+            DOCKER_CMD="docker compose"
+            if ! docker compose version >/dev/null 2>&1; then
+              if command -v docker-compose >/dev/null 2>&1; then
+                DOCKER_CMD="docker-compose"
+              else
+                DOCKER_CMD="sudo docker compose"
+              fi
+            fi
+
+            $DOCKER_CMD down --remove-orphans || true
+            $DOCKER_CMD up -d --build
 
             # 5. Clean up stale/dangling Docker images to save disk space
-            docker image prune -f
+            docker image prune -f || sudo docker image prune -f || true
 
             # 6. Verify health check
             echo "==> Verifying deployment health..."
@@ -121,7 +133,7 @@ jobs:
 
             if [ "$HEALTHY" != "true" ]; then
               echo "Health check failed! Checking logs:"
-              docker compose logs --tail=50
+              $DOCKER_CMD logs --tail=50
               exit 1
             fi
 
