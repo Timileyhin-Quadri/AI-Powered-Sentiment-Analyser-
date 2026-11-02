@@ -8,9 +8,9 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 # Default build-time environment variables for Vite
-ARG VITE_SUPABASE_URL=https://kmiikybkejggpdpsnllr.supabase.co
-ARG VITE_SUPABASE_PUBLISHABLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttaWlreWJrZWpnZ3BkcHNubGxyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE0NTIxNTAsImV4cCI6MjA4NzAyODE1MH0.r46GdHg0A8ZpifvB9s1vr8xbhdtV4OOmzsyp9FxOspk
-ARG VITE_SUPABASE_PROJECT_ID=kmiikybkejggpdpsnllr
+ARG VITE_SUPABASE_URL=https://keaqonqlvicdwlsdnqpe.supabase.co
+ARG VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_59LYLM6sCtxQXJsxHi6M7Q_aNWxOu-4
+ARG VITE_SUPABASE_PROJECT_ID=keaqonqlvicdwlsdnqpe
 
 ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
 ENV VITE_SUPABASE_PUBLISHABLE_KEY=$VITE_SUPABASE_PUBLISHABLE_KEY

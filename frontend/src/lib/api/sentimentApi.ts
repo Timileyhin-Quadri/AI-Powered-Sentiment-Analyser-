@@ -12,6 +12,7 @@ export interface SearchRequest {
   includeRetweets?: boolean;
   includeComments?: boolean;
   language?: string;
+  refresh?: boolean;
 }
 
 export interface SearchResultPost {
@@ -69,7 +70,7 @@ export interface SearchResults {
     key_themes: string[];
     recommendation: string;
   };
-  data_source?: 'live' | 'simulated';
+  data_source?: 'live' | 'simulated' | 'database_cache';
   twitter_status?: {
     status: 'success' | 'no_token' | 'api_error' | 'exception' | 'not_selected';
     error?: string;
@@ -299,6 +300,7 @@ export const analyzeSentiment = async (
           limit,
           max_posts: limit,
           platforms: request.platforms,
+          refresh: Boolean(request.refresh),
         }),
         signal,
       },
@@ -349,7 +351,7 @@ export const analyzeSentiment = async (
         },
       },
       ai_insights: data.ai_insights,
-      data_source: 'live',
+      data_source: data.data_source || 'live',
       twitter_status: { status: 'success' },
     };
   } catch (err) {
@@ -376,6 +378,7 @@ export const analyzeAll = async (
           limit,
           max_posts: limit,
           platforms: request.platforms,
+          refresh: Boolean(request.refresh),
         }),
         signal,
       },
@@ -432,7 +435,7 @@ export const analyzeAll = async (
         key_themes: (customerVoice.complaint_categories || []).map((c: any) => c.category).slice(0, 4),
         recommendation: `Monitor ${summary.negative} negative reactions and complaints for prompt customer outreach.`,
       },
-      data_source: 'live',
+      data_source: data.data_source || 'live',
       twitter_status: { status: 'success' },
     };
   } catch (err) {

@@ -21,6 +21,8 @@ try:
     from backend.scraper import scrape_topic, generate_scraped_tweets_for_topic  # type: ignore
     from backend.analyzer import SentimentEngine
     from backend.gemini_client import get_competitors
+    from backend.ingestion import ingest_brand
+    from backend.database import get_tracked_brands, get_brand_summary
     from backend.models import (
         AnalysisRequest,
         TweetResponse,
@@ -41,6 +43,8 @@ except ImportError:
     from scraper import scrape_topic, generate_scraped_tweets_for_topic  # type: ignore
     from analyzer import SentimentEngine
     from gemini_client import get_competitors
+    from ingestion import ingest_brand
+    from database import get_tracked_brands, get_brand_summary
     from models import (
         AnalysisRequest,
         TweetResponse,
@@ -132,13 +136,24 @@ async def analyze_sentiment(request: AnalysisRequest):
     try:
         target_keyword = request.get_keyword()
         target_limit = request.get_limit()
-        print(f"[REQUEST] Received request for: {target_keyword}")
+        force_refresh = bool(request.refresh)
+        print(f"[REQUEST] Received request for: {target_keyword} (refresh={force_refresh})")
         
-        # Scrape tweets (async with timeout)
-        raw_df = await scrape_with_timeout(target_keyword, max_tweets=target_limit)
+        # Ingest or retrieve from Database
+        loop = asyncio.get_event_loop()
+        ingest_result = await loop.run_in_executor(
+            _scraper_pool,
+            ingest_brand,
+            target_keyword,
+            target_limit,
+            force_refresh
+        )
         
+        tweets_data = ingest_result.get("tweets", [])
+        data_source = ingest_result.get("data_source", "database_cache")
+
         # If no tweets found, return empty response instead of 404
-        if raw_df.empty:
+        if not tweets_data:
             print(f"[WARN] No tweets found for: {target_keyword}")
             return FullResponse(
                 summary=SummaryStats(
@@ -147,13 +162,11 @@ async def analyze_sentiment(request: AnalysisRequest):
                 ),
                 tweets=[],
                 volume_over_time=[],
-                ai_insights=None
+                ai_insights=None,
+                data_source=data_source
             )
 
-        # Analyze sentiment with 5-mini (runs in thread pool to avoid blocking)
-        processed_df = await asyncio.get_event_loop().run_in_executor(
-            _scraper_pool, engine.process_dataframe, raw_df, target_keyword
-        )
+        processed_df = pd.DataFrame(tweets_data)
 
         # Calculate Stats
         total = len(processed_df)
@@ -198,7 +211,8 @@ async def analyze_sentiment(request: AnalysisRequest):
             summary=summary,
             tweets=tweets_list,
             volume_over_time=volume_data,
-            ai_insights=ai_insights
+            ai_insights=ai_insights,
+            data_source=data_source
         )
 
     except HTTPException:
@@ -210,17 +224,28 @@ async def analyze_sentiment(request: AnalysisRequest):
 
 @app.post("/analyze_all", response_model=UnifiedAnalysisResponse)
 async def analyze_all(request: AnalysisRequest):
-    """Unified endpoint that scrapes ONCE and returns both overview and customer voice data."""
+    """Unified endpoint that checks database cache first, or scrapes once, stores in DB, and returns all metrics."""
     try:
         target_keyword = request.get_keyword()
         target_limit = request.get_limit()
-        print(f"[UNIFIED] Analyzing all data for: {target_keyword}")
+        force_refresh = bool(request.refresh)
+        print(f"[UNIFIED] Analyzing all data for: {target_keyword} (refresh={force_refresh})")
         
-        # Scrape tweets ONCE (async with timeout)
-        raw_df = await scrape_with_timeout(target_keyword, max_tweets=target_limit)
+        # Ingest or retrieve from Database
+        loop = asyncio.get_event_loop()
+        ingest_result = await loop.run_in_executor(
+            _scraper_pool,
+            ingest_brand,
+            target_keyword,
+            target_limit,
+            force_refresh
+        )
         
+        tweets_data = ingest_result.get("tweets", [])
+        data_source = ingest_result.get("data_source", "database_cache")
+
         # If no tweets found, return empty response
-        if raw_df.empty:
+        if not tweets_data:
             print(f"[WARN] No tweets found for: {target_keyword}")
             return UnifiedAnalysisResponse(
                 summary=SummaryStats(
@@ -234,13 +259,11 @@ async def analyze_all(request: AnalysisRequest):
                     recent_opinions=[],
                     ai_insights=None
                 ),
-                ai_insights=None
+                ai_insights=None,
+                data_source=data_source
             )
 
-        # Analyze sentiment ONCE with 5-mini (runs in thread pool)
-        processed_df = await asyncio.get_event_loop().run_in_executor(
-            _scraper_pool, engine.process_dataframe, raw_df, target_keyword
-        )
+        processed_df = pd.DataFrame(tweets_data)
 
         # Calculate Stats for Overview
         total = len(processed_df)
@@ -303,7 +326,8 @@ async def analyze_all(request: AnalysisRequest):
             tweets=tweets_list,
             volume_over_time=volume_data,
             customer_voice=customer_voice,
-            ai_insights=ai_insights
+            ai_insights=ai_insights,
+            data_source=data_source
         )
 
     except HTTPException:
@@ -465,6 +489,28 @@ async def customer_complaints(request: AnalysisRequest):
 def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "model_loaded": True}
+
+
+# --- Database & Ingestion Endpoints ---
+@app.get("/brands")
+def list_tracked_brands():
+    """Returns list of tracked brands stored in the database with their metrics."""
+    brands = get_tracked_brands()
+    return {"brands": brands, "total": len(brands)}
+
+
+@app.post("/ingest")
+async def trigger_ingest(brand: str = "GTBank", limit: int = 30):
+    """Trigger background ingestion for a brand and persist to database."""
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(_scraper_pool, ingest_brand, brand, limit, True)
+    return {
+        "status": "success",
+        "brand": brand,
+        "ingested_count": result.get("count", 0),
+        "data_source": result.get("data_source"),
+        "duration_seconds": result.get("duration_seconds", 0)
+    }
 
 
 # --- Session Management Endpoints ---

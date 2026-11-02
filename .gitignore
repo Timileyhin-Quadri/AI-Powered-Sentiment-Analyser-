@@ -71,3 +71,7 @@ session_state.json
 *.session.json
 
 .x_session/
+
+# Local database cache
+*.db
+backend/data/

@@ -13,6 +13,7 @@ class AnalysisRequest(BaseModel):
     limit: Optional[int] = 30
     max_posts: Optional[int] = None
     platforms: Optional[List[str]] = None
+    refresh: Optional[bool] = False
 
     def get_limit(self) -> int:
         """Returns sample size limit, preferring max_posts if provided."""
@@ -139,6 +140,7 @@ class FullResponse(BaseModel):
     tweets: List[TweetResponse]
     volume_over_time: List[VolumeDataPoint]
     ai_insights: Optional[AIInsights] = None
+    data_source: Optional[str] = "database_cache"
 
 
 class UnifiedAnalysisResponse(BaseModel):
@@ -148,3 +150,4 @@ class UnifiedAnalysisResponse(BaseModel):
     volume_over_time: List[VolumeDataPoint]
     customer_voice: CustomerVoiceResponse
     ai_insights: Optional[AIInsights] = None
+    data_source: Optional[str] = "database_cache"

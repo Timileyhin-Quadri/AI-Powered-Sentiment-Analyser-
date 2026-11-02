@@ -70,13 +70,15 @@ export function SearchResultsSummary({ results, request, onNewSearch }: SearchRe
               <h2 className="text-lg font-semibold text-foreground">Analysis Results</h2>
               {data_source && (
                 <Badge variant="outline" className={cn(
-                  'text-xs gap-1',
+                  'text-xs gap-1 font-medium',
                   data_source === 'live'
                     ? 'border-[hsl(var(--sentiment-positive))] text-[hsl(var(--sentiment-positive))]'
+                    : data_source === 'database_cache'
+                    ? 'border-blue-500 text-blue-500 bg-blue-500/10'
                     : 'border-amber-500 text-amber-500'
                 )}>
                   <Radio className="h-3 w-3" />
-                  {data_source === 'live' ? 'Live Data' : 'Simulated'}
+                  {data_source === 'live' ? 'Live Data' : data_source === 'database_cache' ? 'Database Cache (Instant)' : 'Simulated'}
                 </Badge>
               )}
             </div>
